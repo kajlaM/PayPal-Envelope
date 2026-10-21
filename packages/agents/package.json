@@ -1,0 +1,8 @@
+{
+  "name": "@kubepay/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shopping + bill-pay agents (Step 8)",
+  "main": "src/index.ts"
+}

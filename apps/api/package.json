@@ -1,0 +1,8 @@
+{
+  "name": "@kubepay/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Express API: vault routes, webhooks, Socket.IO (Steps 5, 9)",
+  "main": "src/index.ts"
+}

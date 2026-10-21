@@ -1,0 +1,21 @@
+{
+  "name": "kubepay-ai",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "db:generate": "npm run generate -w @kubepay/db",
+    "db:migrate": "npm run migrate -w @kubepay/db",
+    "db:deploy": "npm run deploy -w @kubepay/db",
+    "db:seed": "npm run seed -w @kubepay/db",
+    "db:studio": "npm run studio -w @kubepay/db",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}

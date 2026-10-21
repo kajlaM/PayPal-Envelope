@@ -1,0 +1,8 @@
+{
+  "name": "@kubepay/policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Policy compiler + engine (Steps 6-7)",
+  "main": "src/index.ts"
+}

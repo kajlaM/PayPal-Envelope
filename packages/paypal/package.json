@@ -1,0 +1,8 @@
+{
+  "name": "@kubepay/paypal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PayPal service layer (Step 4)",
+  "main": "src/index.ts"
+}

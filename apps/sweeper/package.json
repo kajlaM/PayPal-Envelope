@@ -1,0 +1,8 @@
+{
+  "name": "@kubepay/sweeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cron job: expiry + auto-liquidation (Step 10)",
+  "main": "src/index.ts"
+}

@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// All money is stored as integer cents (USD).
+
+enum VaultType {
+  SHOPPING
+  UTILITY
+}
+
+enum VaultStatus {
+  PENDING_FUNDING
+  ACTIVE
+  EXPIRED
+  LIQUIDATED
+}
+
+enum LedgerType {
+  FUND      // money in: user -> vault (Orders capture or subscription payment)
+  SPEND     // money out: vault -> merchant (Payouts)
+  LIQUIDATE // money out: vault -> user (Payouts, leftover balance)
+}
+
+enum LedgerStatus {
+  PENDING   // waiting for PayPal to confirm
+  COMPLETED // PayPal confirmed
+  FAILED    // PayPal failed; any held amount is back in the vault
+}
+
+enum DecisionResult {
+  APPROVE
+  BLOCK
+  NEEDS_HUMAN
+}
+
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  paypalEmail String   @unique
+  createdAt   DateTime @default(now())
+  vaults      Vault[]
+
+  @@map("users")
+}
+
+model Vault {
+  id                   String        @id @default(cuid())
+  userId               String
+  name                 String
+  type                 VaultType
+  budgetCents          Int
+  balanceCents         Int           @default(0)
+  status               VaultStatus   @default(PENDING_FUNDING)
+  expiresAt            DateTime
+  paypalSubscriptionId String?       @unique
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  user                 User          @relation(fields: [userId], references: [id])
+  policies             Policy[]
+  ledger               LedgerEntry[]
+  decisions            Decision[]
+
+  @@index([status, expiresAt])
+  @@map("vaults")
+}
+
+model Policy {
+  id         String   @id @default(cuid())
+  vaultId    String
+  version    Int
+  policyJson Json
+  sourceText String?
+  createdAt  DateTime @default(now())
+  vault      Vault    @relation(fields: [vaultId], references: [id])
+
+  @@unique([vaultId, version])
+  @@map("policies")
+}
+
+model LedgerEntry {
+  id          String       @id @default(cuid())
+  vaultId     String
+  type        LedgerType
+  status      LedgerStatus @default(PENDING)
+  amountCents Int
+  paypalRef   String?      @unique // order id, capture id, sale id or payout item id
+  merchantId  String?
+  decisionId  String?      @unique
+  note        String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  vault       Vault        @relation(fields: [vaultId], references: [id])
+  merchant    Merchant?    @relation(fields: [merchantId], references: [id])
+  decision    Decision?    @relation(fields: [decisionId], references: [id])
+
+  @@index([vaultId, createdAt])
+  @@map("ledger_entries")
+}
+
+model Merchant {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  category     String
+  sandboxEmail String
+  approved     Boolean       @default(true)
+  ledger       LedgerEntry[]
+
+  @@map("merchants")
+}
+
+model Decision {
+  id          String         @id @default(cuid())
+  vaultId     String
+  requestJson Json
+  result      DecisionResult
+  reasons     String[]
+  resolvedBy  String?        // set when a human approves/rejects a NEEDS_HUMAN decision
+  createdAt   DateTime       @default(now())
+  vault       Vault          @relation(fields: [vaultId], references: [id])
+  ledgerEntry LedgerEntry?
+
+  @@index([vaultId, createdAt])
+  @@map("decisions")
+}
+
+model PaypalEvent {
+  id         String   @id // PayPal webhook event id, so replays are ignored
+  type       String
+  payload    Json
+  processed  Boolean  @default(false)
+  receivedAt DateTime @default(now())
+
+  @@map("paypal_events")
+}
