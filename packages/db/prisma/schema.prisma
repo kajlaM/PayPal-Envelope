@@ -59,6 +59,10 @@ model Vault {
   status               VaultStatus   @default(PENDING_FUNDING)
   expiresAt            DateTime
   paypalSubscriptionId String?       @unique
+  // Agent watch mode (Step 8): when the agent should look again, and how the last run ended
+  nextAgentRunAt       DateTime?
+  lastAgentRunAt       DateTime?
+  lastAgentOutcome     String?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   user                 User          @relation(fields: [userId], references: [id])
@@ -67,6 +71,7 @@ model Vault {
   decisions            Decision[]
 
   @@index([status, expiresAt])
+  @@index([status, nextAgentRunAt])
   @@map("vaults")
 }
 
@@ -108,6 +113,7 @@ model Merchant {
   name         String        @unique
   category     String
   sandboxEmail String
+  domain       String?       // real shop website, e.g. bestbuy.com (product search)
   approved     Boolean       @default(true)
   ledger       LedgerEntry[]
 

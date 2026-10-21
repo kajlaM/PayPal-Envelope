@@ -13,8 +13,9 @@ if (!userEmail || !audioEmail || !utilityEmail) {
 
 const merchants = [
   { name: 'Audio Store', category: 'Electronics', sandboxEmail: audioEmail },
-  { name: 'BestBuy', category: 'Electronics', sandboxEmail: audioEmail },
-  { name: 'Target', category: 'Electronics', sandboxEmail: audioEmail },
+  { name: 'BestBuy', category: 'Electronics', sandboxEmail: audioEmail, domain: 'bestbuy.com' },
+  { name: 'Target', category: 'Electronics', sandboxEmail: audioEmail, domain: 'target.com' },
+  { name: 'Walmart', category: 'Electronics', sandboxEmail: audioEmail, domain: 'walmart.com' },
   { name: 'City Utility', category: 'Utilities', sandboxEmail: utilityEmail },
 ];
 

@@ -59,6 +59,15 @@ export async function completeFunding(paypalOrderId: string) {
   });
 }
 
+/** PayPal denied the capture: the vault never got this money. Safe to call twice. */
+export async function failFunding(paypalOrderId: string, reason?: string) {
+  const { count } = await prisma.ledgerEntry.updateMany({
+    where: { paypalRef: paypalOrderId, type: 'FUND', status: 'PENDING' },
+    data: { status: 'FAILED', note: reason ? `Funding failed: ${reason}` : undefined },
+  });
+  return count > 0;
+}
+
 /** Subscription payment (top-up) arrived. Safe to call twice with the same sale id. */
 export async function addFunding(vaultId: string, amountCents: number, paypalSaleId: string) {
   assertAmount(amountCents);

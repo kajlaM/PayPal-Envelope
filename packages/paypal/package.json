@@ -3,6 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "PayPal service layer (Step 4)",
-  "main": "src/index.ts"
+  "description": "PayPal service layer (Step 4). The only code that talks to PayPal.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "smoke": "tsx scripts/smoke.ts",
+    "setup:plan": "tsx scripts/setup-plan.ts",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "setup:webhooks": "tsx scripts/setup-webhooks.ts"
+  },
+  "dependencies": {
+    "@paypal/paypal-server-sdk": "2.5.0",
+    "dotenv": "^16.4.7"
+  }
 }

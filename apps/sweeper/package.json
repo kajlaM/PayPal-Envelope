@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Cron job: expiry + auto-liquidation (Step 10)",
-  "main": "src/index.ts"
+  "description": "Cron job: expiry + auto-liquidation + agent watch (Step 10)",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1"
+  }
 }
