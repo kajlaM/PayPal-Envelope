@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@kubepay/agents": "*",
+    "@kubepay/audit": "*",
     "@kubepay/db": "*",
     "@kubepay/paypal": "*",
     "@kubepay/policy": "*",

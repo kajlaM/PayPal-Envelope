@@ -211,6 +211,7 @@ vaultsRouter.post('/:id/decisions/:decisionId/approve', async (req, res) => {
     data: { resolvedBy: 'APPROVED_BY_HUMAN' },
   });
   if (claimed.count === 0) throw new HttpError(409, 'DECISION_NOT_PENDING');
+  emit('decision:created', { vaultId: decision.vaultId, decisionId: decision.id, result: 'APPROVED_BY_HUMAN' });
   const result = await executeSpend(decision.id);
   res.json(result);
 });

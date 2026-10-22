@@ -54,7 +54,7 @@ User ──Subscriptions API (monthly auto top-up)──► KubePay Platform
 | **Channel3 API** | Product search for the shopping agent | 8 |
 | **Kernel** (`@onkernel/sdk` + Playwright) | Cloud browser that opens the product page and verifies the live price and merchant | 8 |
 | **PostgreSQL** (Render Postgres) + **Prisma** | Vaults, policies, ledger, merchants, decisions | 3 |
-| **Elasticsearch** (Elastic Cloud) | Audit log search, vector similarity for spotting unusual spending, copilot retrieval | 11 |
+| **Elasticsearch** (Elastic Cloud) | Audit log (keyword + semantic search), spend history for spotting unusual spending, copilot retrieval | 11 |
 | **Socket.IO** | Live updates pushed to the dashboard | 13 |
 | **Zapier** (Webhooks by Zapier → Slack/Gmail) | Alerts on blocked payments and liquidations | 12 |
 | **React + Vite** | Dashboard app | 13 |
@@ -95,6 +95,7 @@ kubepay-ai/
 │   ├── paypal/         # PayPal service layer (Step 4)
 │   ├── policy/         # Policy compiler + engine (Steps 6–7)
 │   ├── agents/         # Shopping + bill-pay agents (Step 8)
+│   ├── audit/          # Elastic audit log, anomaly score, Audit Copilot (Step 11)
 │   └── db/             # Prisma schema + client
 ├── postman/            # Postman collections
 └── .env
@@ -113,7 +114,7 @@ USER_SANDBOX_EMAIL=user@...
 ANTHROPIC_API_KEY=...
 CHANNEL3_API_KEY=...
 KERNEL_API_KEY=...
-ELASTIC_CLOUD_ID=...
+ELASTIC_URL=...
 ELASTIC_API_KEY=...
 ZAPIER_HOOK_URL=...
 DATABASE_URL=postgres://...
@@ -380,17 +381,16 @@ Zapier alerts for expiry and refunds are added in Step 12.
 
 ---
 
-## 11. Audit Search and Copilot (Elastic)
+## 11. Audit Search and Copilot (Elastic, `packages/audit`)
 
-Tools: **Elastic Cloud** + `@elastic/elasticsearch` + **Claude**.
+Tools: **Elasticsearch Serverless** (Elastic Cloud, GCP `us-east4`) + `@elastic/elasticsearch` + **Claude** (Gemini backup) for the Copilot. Set `ELASTIC_URL` (the project's Elasticsearch endpoint) and `ELASTIC_API_KEY`. Without them the audit is off and everything else still works.
 
-1. **Index** `kubepay-decisions`. Fields: vault_id, merchant, amount, category, result, reasons, a `reason_text` stored as `semantic_text` (Elastic inference does the embedding), and timestamp.
-2. Write every decision and ledger event to this index (Step 7, Step 9).
-3. **Anomaly check (Policy Engine check 9):** run a kNN search with the new request against the vault's past approved spends. A low similarity, or an amount far above the median, raises a `NEEDS_HUMAN` flag.
-4. **Audit Copilot:** a dashboard chat box.
-   - The user asks a question, for example *"Why was my headphone purchase blocked?"*
-   - A hybrid search (BM25 + semantic) pulls the top decisions.
-   - Claude answers from those results only, citing decision ids.
+1. **Index** `kubepay-decisions` (created when the API starts): one document per decision (`decision-<id>`) and per ledger entry (`ledger-<id>`). Fields: vault, merchant, amount, category, result, reasons, invoice, timestamp, plus a plain-English `summary` (e.g. *"Blocked payment of $48.00 to Audio Store … because the amount was above the per-purchase limit (MAX_LIMIT_EXCEEDED)"*). The summary is stored twice: `text` for keyword search and `semantic_text` (Elastic makes the embeddings with ELSER).
+2. **Writing:** the API sends every `decision:created` / `ledger:updated` event to Elastic in the background (`apps/api/src/services/audit.ts`). Payments never wait for it or fail because of it. `POST /api/audit/reindex` (`x-internal-key`) copies everything already in Postgres.
+3. **Anomaly check** (Policy Engine soft rule `UNUSUAL_SPEND`, score ≥ 0.8 → `NEEDS_HUMAN`): Elastic aggregates the vault's past approved spends (median amount, merchants, categories).
+   - 2× the median amount scores 0, 5× scores 1; a new merchant and a new category add 0.2 each.
+   - Fewer than 3 past spends → 0 (not enough history). Elastic off or slower than 2 s → no score, the payment continues.
+4. **Audit Copilot** (`POST /api/audit/ask {question, vaultId?}`): hybrid search (BM25 + semantic, merged with RRF) finds the top 8 records; the AI answers from those records only and cites their ids, e.g. *"blocked because the live price differed … [decision-cmvi…]"*. `GET /api/audit/search?q=&vaultId=` returns the records alone.
 
 ---
 

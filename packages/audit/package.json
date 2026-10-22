@@ -1,0 +1,21 @@
+{
+  "name": "@kubepay/audit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Audit log, anomaly score, and Audit Copilot on Elasticsearch (Step 11)",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@elastic/elasticsearch": "9.5.1",
+    "@kubepay/policy": "*",
+    "ai": "5.0.272",
+    "dotenv": "^16.6.1"
+  }
+}

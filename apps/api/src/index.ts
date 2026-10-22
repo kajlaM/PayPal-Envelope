@@ -6,8 +6,10 @@ import { Server } from 'socket.io';
 import { prisma } from '@kubepay/db';
 import { setSocketServer } from './events.ts';
 import { errorHandler, requireInternalKey } from './http.ts';
+import { auditRouter } from './routes/audit.ts';
 import { demoStoreRouter } from './routes/demo-store.ts';
 import { vaultsRouter } from './routes/vaults.ts';
+import { startAuditLog } from './services/audit.ts';
 import { startBackgroundJobs, tick } from './services/scheduler.ts';
 import { webhooksRouter } from './webhooks.ts';
 
@@ -21,6 +23,7 @@ app.get('/health', (_req, res) => {
 });
 app.use('/api/vaults', vaultsRouter);
 app.use('/demo-store', demoStoreRouter);
+app.use('/api/audit', auditRouter);
 // One background tick (sweeper + agent watch) for a cron job; the server also runs it every minute.
 app.post('/api/jobs/tick', requireInternalKey, async (_req, res) => {
   res.json(await tick());
@@ -45,4 +48,5 @@ const port = Number(process.env.PORT ?? 4000);
 server.listen(port, () => {
   console.log(`KubePay API on http://localhost:${port}`);
   startBackgroundJobs();
+  startAuditLog().catch((err) => console.error('Audit log failed to start:', (err as Error).message));
 });
