@@ -1,0 +1,718 @@
+{
+  "info": {
+    "name": "KubePay – API end-to-end",
+    "description": "create → fund → spend → liquidate against a running KubePay API (npm run api:dev).\n\n1. Run folder **1. Create and fund**. The console prints a PayPal approve link.\n2. Open the link and log in as the **user** sandbox account, then approve.\n3. Run folder **2. Spend and liquidate**.\n\nReal sandbox money moves: $20 from the user into the vault, $5 to the merchant, $15 back to the user. The blocked spend sends a Zapier alert if ZAPIER_HOOK_URL is set.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Create and fund",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kubepay_url}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok', () => pm.expect(pm.response.json().ok).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Merchants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kubepay_url}}/api/merchants"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const m = pm.response.json().find(x => x.name === pm.variables.get('merchant_name'));",
+                  "pm.test('merchant is registered', () => pm.expect(m, pm.variables.get('merchant_name')).to.be.an('object'));",
+                  "pm.collectionVariables.set('merchant_category', m.category);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Compile policy (Claude)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/compile",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Create a vault with $20 to buy headphones from {{merchant_name}} within 2 days, max $10 per purchase.\"\n}"
+            },
+            "description": "Plain English → policy JSON. The next request uses a fixed policy instead, so the run does not depend on the model's wording."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().policy;",
+                  "pm.test('budget 20', () => pm.expect(p.allocated_budget).to.eql(20));",
+                  "pm.test('max 10 per purchase', () => pm.expect(p.rules.max_single_transaction).to.eql(10));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create vault",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policy\": {\n    \"vault_name\": \"Postman E2E\",\n    \"vault_type\": \"SHOPPING\",\n    \"allocated_budget\": 20,\n    \"rules\": {\n      \"max_single_transaction\": 10,\n      \"allowed_categories\": [\n        \"{{merchant_category}}\"\n      ],\n      \"approved_merchants\": [\n        \"{{merchant_name}}\"\n      ],\n      \"expiry_timestamp\": \"{{expiry}}\"\n    }\n  },\n  \"sourceText\": \"Postman end-to-end test\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('expiry', new Date(Date.now() + 2 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const v = pm.response.json();",
+                  "pm.test('waiting for funding', () => pm.expect(v.status).to.eql('PENDING_FUNDING'));",
+                  "pm.collectionVariables.set('vault_id', v.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spend before funding is blocked",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"{{merchant_name}}\",\n  \"amount\": 5,\n  \"verified_price\": 5,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: too early\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "pm.test('VAULT_INACTIVE', () => pm.expect(pm.response.json().decision.reasons).to.include('VAULT_INACTIVE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spend without the internal key is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"merchant\": \"{{merchant_name}}\", \"amount\": 5, \"category\": \"{{merchant_category}}\", \"reason\": \"Postman: no key\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fund: create PayPal order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/fund/order",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const o = pm.response.json();",
+                  "pm.collectionVariables.set('order_id', o.orderId);",
+                  "pm.test('has approve link', () => pm.expect(o.approveUrl).to.be.a('string'));",
+                  "console.log('Approve as the user sandbox account, then run folder 2:', o.approveUrl);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Spend and liquidate",
+      "item": [
+        {
+          "name": "Fund: capture approved order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/fund/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"orderId\": \"{{order_id}}\"}"
+            },
+            "description": "Fails with PAYPAL_ERROR / ORDER_NOT_APPROVED if the approve link from folder 1 was not completed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const v = pm.response.json();",
+                  "pm.test('vault active', () => pm.expect(v.status).to.eql('ACTIVE'));",
+                  "pm.test('balance $20', () => pm.expect(v.balanceCents).to.eql(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capture again is safe (no double credit)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/fund/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"orderId\": \"{{order_id}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('still $20', () => pm.expect(pm.response.json().balanceCents).to.eql(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Over the per-purchase limit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"{{merchant_name}}\",\n  \"amount\": 15,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: Over the per-purchase limit\",\n  \"verified_price\": 15\n}"
+            },
+            "description": "The guardrail demo: $15 > $10 limit. Sends a Zapier alert."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "const d = pm.response.json().decision;",
+                  "pm.test('BLOCK', () => pm.expect(d.result).to.eql('BLOCK'));",
+                  "pm.test('reason MAX_LIMIT_EXCEEDED', () => pm.expect(d.reasons).to.include('MAX_LIMIT_EXCEEDED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Merchant not in the policy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"Shady Electronics\",\n  \"amount\": 5,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: Merchant not in the policy\",\n  \"verified_price\": 5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "const d = pm.response.json().decision;",
+                  "pm.test('BLOCK', () => pm.expect(d.result).to.eql('BLOCK'));",
+                  "pm.test('reason MERCHANT_NOT_APPROVED', () => pm.expect(d.reasons).to.include('MERCHANT_NOT_APPROVED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Live price differs from the asked amount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"{{merchant_name}}\",\n  \"amount\": 5,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: Live price differs from the asked amount\",\n  \"verified_price\": 4.5\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "const d = pm.response.json().decision;",
+                  "pm.test('BLOCK', () => pm.expect(d.result).to.eql('BLOCK'));",
+                  "pm.test('reason PRICE_MISMATCH', () => pm.expect(d.reasons).to.include('PRICE_MISMATCH'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Price not verified goes to a human",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"{{merchant_name}}\",\n  \"amount\": 5,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: Price not verified goes to a human\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 202', () => pm.response.to.have.status(202));",
+                  "const d = pm.response.json().decision;",
+                  "pm.test('NEEDS_HUMAN', () => pm.expect(d.result).to.eql('NEEDS_HUMAN'));",
+                  "pm.test('reason PRICE_NOT_VERIFIED', () => pm.expect(d.reasons).to.include('PRICE_NOT_VERIFIED'));",
+                  "pm.collectionVariables.set('unverified_decision_id', d.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject the unverified spend",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/decisions/{{unverified_decision_id}}/reject",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('rejected', () => pm.expect(pm.response.json().resolvedBy).to.eql('REJECTED_BY_HUMAN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Valid spend is paid",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"{{merchant_name}}\",\n  \"amount\": 5,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: Valid spend is paid\",\n  \"verified_price\": 5\n}"
+            },
+            "description": "Approved: $5 is held in the ledger and paid to the merchant with Payouts."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().decision;",
+                  "pm.test('APPROVE', () => pm.expect(d.result).to.eql('APPROVE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same spend again is held as a possible duplicate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"{{merchant_name}}\",\n  \"amount\": 5,\n  \"verified_price\": 5,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: Valid spend is paid\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 202', () => pm.response.to.have.status(202));",
+                  "const d = pm.response.json().decision;",
+                  "pm.test('POSSIBLE_DUPLICATE', () => pm.expect(d.reasons).to.include('POSSIBLE_DUPLICATE'));",
+                  "pm.collectionVariables.set('duplicate_decision_id', d.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject the duplicate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/decisions/{{duplicate_decision_id}}/reject",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Vault balance is $15",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const v = pm.response.json();",
+                  "pm.test('balance $15', () => pm.expect(v.balanceCents).to.eql(1500));",
+                  "pm.collectionVariables.set('balance_cents', v.balanceCents);",
+                  "pm.test('one SPEND entry', () => pm.expect(v.ledger.filter(e => e.type === 'SPEND').length).to.eql(1));",
+                  "pm.test('7 decisions', () => pm.expect(v.decisions.length).to.eql(7));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sync payouts with PayPal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/sync",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Liquidate: refund the rest to the owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/liquidate",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "While PayPal is still processing the $5 payout the API answers 409 PENDING_SPENDS; this request then waits 10 s and tries again (up to 3 minutes). If the refund never starts, the run stops here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "const tries = Number(pm.collectionVariables.get('liquidate_tries') || 0);",
+                  "if (pm.response.code === 409 && r.error === 'PENDING_SPENDS' && tries < 18) {",
+                  "  pm.collectionVariables.set('liquidate_tries', tries + 1);",
+                  "  console.log('Payout still pending at PayPal, retrying in 10 s (' + (tries + 1) + '/18)');",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "  setTimeout(() => {}, 10000);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset('liquidate_tries');",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code !== 200) { postman.setNextRequest(null); return; } // never test a vault that is still open",
+                  "pm.test('refund = what was left', () => pm.expect(r.ledgerEntry.amountCents).to.eql(Number(pm.variables.get('balance_cents'))));",
+                  "pm.test('vault balance 0', () => pm.expect(r.vault.balanceCents).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Spend after liquidation is blocked",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-internal-key",
+                "value": "{{internal_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kubepay_url}}/api/vaults/{{vault_id}}/spend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"merchant\": \"{{merchant_name}}\",\n  \"amount\": 1,\n  \"verified_price\": 1,\n  \"category\": \"{{merchant_category}}\",\n  \"reason\": \"Postman: too late\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "pm.test('VAULT_INACTIVE', () => pm.expect(pm.response.json().decision.reasons).to.include('VAULT_INACTIVE'));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Run after approving the order from folder 1 in the browser."
+    }
+  ],
+  "variable": [
+    {
+      "key": "vault_id",
+      "value": ""
+    },
+    {
+      "key": "order_id",
+      "value": ""
+    },
+    {
+      "key": "merchant_category",
+      "value": ""
+    },
+    {
+      "key": "expiry",
+      "value": ""
+    },
+    {
+      "key": "unverified_decision_id",
+      "value": ""
+    },
+    {
+      "key": "duplicate_decision_id",
+      "value": ""
+    },
+    {
+      "key": "balance_cents",
+      "value": ""
+    },
+    {
+      "key": "liquidate_tries",
+      "value": ""
+    }
+  ]
+}

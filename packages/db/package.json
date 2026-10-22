@@ -13,6 +13,7 @@
     "deploy": "prisma migrate deploy",
     "seed": "prisma db seed",
     "studio": "prisma studio",
+    "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

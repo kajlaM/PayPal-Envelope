@@ -10,6 +10,7 @@ import { auditRouter } from './routes/audit.ts';
 import { demoStoreRouter } from './routes/demo-store.ts';
 import { vaultsRouter } from './routes/vaults.ts';
 import { startAuditLog } from './services/audit.ts';
+import { startNotifications } from './services/notify.ts';
 import { startBackgroundJobs, tick } from './services/scheduler.ts';
 import { webhooksRouter } from './webhooks.ts';
 
@@ -48,5 +49,6 @@ const port = Number(process.env.PORT ?? 4000);
 server.listen(port, () => {
   console.log(`KubePay API on http://localhost:${port}`);
   startBackgroundJobs();
+  startNotifications();
   startAuditLog().catch((err) => console.error('Audit log failed to start:', (err as Error).message));
 });

@@ -13,7 +13,9 @@
     "db:studio": "npm run studio -w @kubepay/db",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "api:dev": "npm run dev -w @kubepay/api",
-    "api:start": "npm run start -w @kubepay/api"
+    "api:start": "npm run start -w @kubepay/api",
+    "web:dev": "npm run dev -w @kubepay/web",
+    "web:build": "npm run build -w @kubepay/web"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

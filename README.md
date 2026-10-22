@@ -398,7 +398,10 @@ Tools: **Elasticsearch Serverless** (Elastic Cloud, GCP `us-east4`) + `@elastic/
 
 Tool: **Zapier** → trigger **Webhooks by Zapier: Catch Hook** → actions **Slack: Send Channel Message** and **Gmail: Send Email**.
 
-The backend POSTs to `ZAPIER_HOOK_URL` on `BLOCK`, `NEEDS_HUMAN`, `LIQUIDATED`, and payout failures. Send `{ event, vault, amount, reasons, dashboard_link }`.
+The backend POSTs to `ZAPIER_HOOK_URL` on `BLOCK`, `NEEDS_HUMAN`, `LIQUIDATED`, and payout failures (`PAYOUT_FAILED`). Without the URL, alerts are off and everything else still works.
+
+- Body: `{ event, vault: {id, name, type, status}, amount, merchant, reasons, message, dashboard_link, timestamp }`. `message` is the same plain-English sentence as the audit log; `dashboard_link` uses `DASHBOARD_URL` (default `http://localhost:5173`).
+- Sent in the background from the API's event stream (`apps/api/src/services/notify.ts`), once per decision / ledger status. A human approving or rejecting sends no alert.
 
 ---
 
@@ -417,6 +420,13 @@ Tools: **React + Vite**, **AG Grid**, **Bryntum Scheduler**, **PayPal JS SDK**, 
 | Vault timeline | **Bryntum Scheduler** | Each vault as a bar from creation to expiry, with spend events marked |
 | Audit Copilot | Chat panel | Step 11 answers |
 
+Run: `npm run api:dev` and `npm run web:dev`, then open `http://localhost:5173`.
+
+- One page: clicking a vault in the grid selects it (kept in `?vault=<id>`, so Zapier alert links open it). The selected-vault panel shows its rules, the PayPal button (`PENDING_FUNDING`), **Run agent** with its live tool calls, **Stop watching**, **Sync payouts**, and **Liquidate now**.
+- Live: the page reloads vaults, decisions and ledger on every Socket.IO event (`src/live.ts`); `agent:step` events stream in as the agent works.
+- Utility vaults can fund one-time (Orders) or by monthly subscription; the subscription only credits the vault when the `PAYMENT.SALE.COMPLETED` webhook arrives (needs a public URL, Step 15).
+- Config (root `.env`): `VITE_API_URL` (default `http://localhost:4000`) and `VITE_PAYPAL_CLIENT_ID` (falls back to `PAYPAL_CLIENT_ID`). Bryntum uses the free trial package (watermark) and loads only when the Timeline tab opens.
+
 ---
 
 ## 14. Testing
@@ -430,6 +440,15 @@ Tools: **React + Vite**, **AG Grid**, **Bryntum Scheduler**, **PayPal JS SDK**, 
 | Webhook handling | PayPal Dashboard **Webhooks Simulator** + replaying the same event (should be ignored) |
 | Double spend | Fire 2 `spend` calls in parallel; only one should pass when the balance covers just one |
 | Money shown matches sandbox | Log in to `sandbox.paypal.com` as each account and compare balances with the ledger |
+
+**Unit tests:** `npm test -w packages/<policy|paypal|agents|audit|db>`. The `db` tests use the real database (`DATABASE_URL`): each makes a throwaway user and vaults, deletes them afterwards, and makes no PayPal calls. They cover double spend (2 and 10 parallel spends), funding / subscription payments / failed payouts arriving twice, and liquidation (waits for open spends, closes an empty vault). Every check ends with `reconcile()` (balance = ledger).
+
+**Postman** (`postman/`): import both collections and the **KubePay sandbox** environment, then fill in the empty values from `.env` (`paypal_client_*`, `utility_client_*`, `merchant_email` = `AUDIO_STORE_SANDBOX_EMAIL`, `internal_key`).
+
+- **KubePay – PayPal sandbox:** token, order create/get, capture refused before approval, capture declined (`INSTRUMENT_DECLINED` mock), payout + status, same `sender_batch_id` refused, payout refused (`INSUFFICIENT_FUNDS` mock), utility invoices. Moves $1.01 platform → merchant.
+- **KubePay – API end-to-end** (API running): folder **1** creates a $20 vault and a funding order and prints the approve link → approve it as the **user** sandbox account → folder **2** captures, then tests over-limit / unknown merchant / price mismatch (BLOCK), unverified price and duplicate (NEEDS_HUMAN → rejected), a valid $5 payout, and liquidation ($15 back to the user).
+- From the command line: `npx newman run postman/<collection>.json -e postman/kubepay-sandbox.postman_environment.json --env-var internal_key=...` (add `--folder "1. Create and fund"` for the end-to-end collection). Newman forgets variables between runs, so for folder 2 also pass `--env-var vault_id=... --env-var order_id=... --env-var merchant_category=...` from folder 1's output; the Postman app keeps them by itself.
+- Webhook tests (Simulator, replay) need a public API URL, so they run after the Render deploy (Step 15).
 
 ---
 
