@@ -15,7 +15,11 @@
     "api:dev": "npm run dev -w @kubepay/api",
     "api:start": "npm run start -w @kubepay/api",
     "web:dev": "npm run dev -w @kubepay/web",
-    "web:build": "npm run build -w @kubepay/web"
+    "web:build": "npm run build -w @kubepay/web",
+    "site:dev": "tsx watch paypal-interface/server.ts",
+    "site:start": "tsx paypal-interface/server.ts",
+    "tunnel": "npx -y cloudflared tunnel --url http://localhost:3000",
+    "up": "tsx scripts/up.mts"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

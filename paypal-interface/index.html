@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PayPal: Summary & Wallet Interface</title>
+  <meta name="description" content="Realistic PayPal login and wallet dashboard interface replica for presentation and design demonstration.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+
+  <!-- ========================================================================= -->
+  <!-- 1. LOGIN PAGE VIEW -->
+  <!-- ========================================================================= -->
+  <main id="loginView" class="view-screen hidden" aria-labelledby="loginHeading">
+    <div class="login-wrapper">
+      <header class="login-header">
+        <div class="paypal-logo-main">
+          <!-- PayPal Monogram SVG -->
+          <svg class="pp-logo-svg" viewBox="0 0 112 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="PayPal">
+            <path d="M12.5 4H5.2c-.8 0-1.4.6-1.5 1.4L.7 26.3c-.1.6.3 1.1.9 1.1h4.2c.8 0 1.4-.6 1.5-1.4l1-6.4c.1-.8.7-1.4 1.5-1.4h2.4c5.1 0 9-2.1 10.1-8.2.5-2.7 0-4.8-1.5-6.1C19.1 4.7 16.3 4 12.5 4z" fill="#003087"/>
+            <path d="M13.5 10H6.2c-.8 0-1.4.6-1.5 1.4L1.7 32.3c-.1.6.3 1.1.9 1.1h4.2c.8 0 1.4-.6 1.5-1.4l1-6.4c.1-.8.7-1.4 1.5-1.4h2.4c5.1 0 9-2.1 10.1-8.2.5-2.7 0-4.8-1.5-6.1-1.7-.8-4.5-1.3-7.8-1.3z" fill="#0079C1" opacity="0.9"/>
+            <path d="M7.7 11.4c.1-.8.7-1.4 1.5-1.4h6c3.2 0 5.6.5 6.8 1.7.9.9 1.2 2.3.9 4-.9 5-4.2 6.7-8.3 6.7H11c-.7 0-1.2.5-1.3 1.2l-1 6.3c0 .3-.3.5-.6.5H5.8c-.5 0-.8-.4-.7-.9l2.6-18.1z" fill="#00457C"/>
+            <!-- Wordmark text representation -->
+            <text x="32" y="24" font-family="'Inter', -apple-system, sans-serif" font-weight="800" font-style="italic" font-size="22" fill="#003087">Pay</text>
+            <text x="70" y="24" font-family="'Inter', -apple-system, sans-serif" font-weight="800" font-style="italic" font-size="22" fill="#0079C1">Pal</text>
+          </svg>
+        </div>
+      </header>
+
+      <section class="login-card">
+        <h1 id="loginHeading" class="sr-only">Log in to PayPal</h1>
+        <form id="loginForm" class="login-form" onsubmit="return false;">
+          <div class="form-floating-group">
+            <input type="text" id="loginEmail" class="form-input" placeholder=" " autocomplete="username" autocapitalize="none" spellcheck="false" required>
+            <label for="loginEmail" class="floating-label">Email or username</label>
+          </div>
+
+          <div class="form-floating-group password-group" id="passwordContainer">
+            <input type="password" id="loginPassword" class="form-input" placeholder=" " autocomplete="current-password" required>
+            <label for="loginPassword" class="floating-label">Password</label>
+            <button type="button" class="toggle-password-btn" id="togglePasswordBtn" aria-label="Toggle password visibility">Show</button>
+          </div>
+
+          <p class="login-error hidden" id="loginError" role="alert"></p>
+
+          <div class="login-actions">
+            <a href="javascript:void(0)" class="forgot-link" id="forgotPasswordLink">Forgot password?</a>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-block btn-login" id="loginSubmitBtn">
+            <span>Log In</span>
+          </button>
+
+          <div class="or-divider">
+            <span class="divider-line"></span>
+            <span class="divider-text">or</span>
+            <span class="divider-line"></span>
+          </div>
+
+          <button type="button" class="btn btn-secondary btn-block" id="signUpBtn">
+            <span>Sign Up</span>
+          </button>
+        </form>
+
+        <div class="login-card-footer">
+          <div class="security-badge">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2c2e2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span>Safe &amp; Secure 256-Bit SSL Encryption</span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="login-footer">
+        <div class="footer-lang-selector">
+          <span class="active-lang">English</span>
+          <span class="lang-divider">|</span>
+          <a href="javascript:void(0)" class="footer-link">Español</a>
+          <span class="lang-divider">|</span>
+          <a href="javascript:void(0)" class="footer-link">Français</a>
+          <span class="lang-divider">|</span>
+          <a href="javascript:void(0)" class="footer-link">中文</a>
+        </div>
+        <nav class="footer-nav" aria-label="Footer Navigation">
+          <a href="javascript:void(0)" class="footer-link">Contact Us</a>
+          <a href="javascript:void(0)" class="footer-link">Privacy</a>
+          <a href="javascript:void(0)" class="footer-link">Legal</a>
+          <a href="javascript:void(0)" class="footer-link">Policy Updates</a>
+          <a href="javascript:void(0)" class="footer-link">Worldwide</a>
+        </nav>
+      </footer>
+    </div>
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- 2. DASHBOARD VIEW -->
+  <!-- ========================================================================= -->
+  <div id="dashboardView" class="view-screen hidden">
+    
+    <!-- Top Global Navigation Bar -->
+    <header class="dash-navbar" role="banner">
+      <div class="dash-nav-container">
+        <div class="nav-brand-section">
+          <a href="javascript:void(0)" class="dash-logo-link" aria-label="PayPal Home">
+            <svg class="pp-logo-small" viewBox="0 0 34 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M26.2 7.8c-1.1-1.3-2.8-2.1-5-2.6-1.5-.3-3.3-.4-5.4-.4H3.8C2.8 4.8 2 5.6 1.8 6.6L0 34.2c-.1.8.5 1.5 1.3 1.5h6.6c.9 0 1.6-.7 1.7-1.6l1.2-8c.1-.9.9-1.6 1.8-1.6h3.4c6.8 0 12.1-2.8 13.6-10.8.6-3.4 0-6.1-2-7.9z" fill="#003087"/>
+              <path d="M28.4 13.8c-1.1-1.3-2.8-2.1-5-2.6-1.5-.3-3.3-.4-5.4-.4H6c-1 0-1.8.8-2 1.8L2.2 40.2c-.1.8.5 1.5 1.3 1.5h6.6c.9 0 1.6-.7 1.7-1.6l1.2-8c.1-.9.9-1.6 1.8-1.6h3.4c6.8 0 12.1-2.8 13.6-10.8.6-3.4 0-6.1-2-7.9z" fill="#0079C1" opacity="0.9"/>
+              <path d="M12.4 14.5c.1-.9.9-1.6 1.8-1.6h7.6c3.9 0 6.9.7 8.3 2.1 1.1 1.1 1.5 2.8 1.1 4.9-1.1 6.2-5.3 8.3-10.4 8.3H16.4c-.9 0-1.6.7-1.7 1.6l-1.3 8.3c0 .4-.4.7-.8.7H8.3c-.6 0-1-.5-.9-1.1l3.5-23.2z" fill="#00457C"/>
+            </svg>
+          </a>
+          
+          <nav class="dash-primary-nav" aria-label="Primary Navigation">
+            <button type="button" class="nav-item active" data-tab="summary">Home</button>
+            <button type="button" class="nav-item" data-tab="send-request">Send &amp; Request</button>
+            <button type="button" class="nav-item" data-tab="wallet">Wallet</button>
+            <button type="button" class="nav-item" data-tab="vaults">Vaults</button>
+            <button type="button" class="nav-item" data-tab="activity">Activity</button>
+            <button type="button" class="nav-item" data-tab="help">Help</button>
+          </nav>
+        </div>
+
+        <div class="nav-utilities-section">
+          <button type="button" class="utility-icon-btn" id="notificationsBtn" aria-label="Notifications (2 new)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span class="badge-dot">2</span>
+          </button>
+
+          <button type="button" class="utility-icon-btn" id="settingsBtn" aria-label="Settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+
+          <div class="user-profile-badge">
+            <div class="user-avatar" id="userAvatar"></div>
+            <div class="user-meta">
+              <span class="user-name" id="userName"></span>
+              <span class="user-tier" id="userTier">Personal Account</span>
+            </div>
+            <button type="button" class="btn-logout" id="logoutBtn" title="Log out of PayPal">
+              Log Out
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Sub-Navbar / Quick Actions Ribbon -->
+    <section class="quick-ribbon-bar">
+      <div class="dash-nav-container ribbon-content">
+        <div class="ribbon-greeting">
+          <h1 id="greeting">Welcome</h1>
+          <span class="verified-pill">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            Verified
+          </span>
+        </div>
+        <div class="ribbon-actions">
+          <button type="button" class="ribbon-btn" id="quickSendBtn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span>Send</span>
+          </button>
+          <button type="button" class="ribbon-btn" id="quickRequestBtn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Request</span>
+          </button>
+          <button type="button" class="ribbon-btn" id="quickAddMoneyBtn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Add Money</span>
+          </button>
+          <button type="button" class="ribbon-btn ribbon-btn-accent" id="quickAddCardRibbonBtn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+            <span>+ Add Debit Card</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Dashboard Container -->
+    <main class="dash-main-container">
+      <div class="dash-grid-layout">
+
+        <!-- ================= LEFT COLUMN (Primary Cards, Balance & Transactions) ================= -->
+        <div class="dash-col-primary">
+
+          <!-- 1. PayPal Balance Card -->
+          <article class="dash-card balance-hero-card">
+            <div class="card-top-row">
+              <div class="balance-meta">
+                <span class="card-caption">PayPal Balance</span>
+                <div class="balance-amount-display">
+                  <span class="currency-symbol">$</span>
+                  <span class="balance-val" id="displayedBalance">–</span>
+                  <span class="currency-code">USD</span>
+                </div>
+                <p class="balance-subtext" id="balanceSubtext">PayPal sandbox balance &bull; updates live</p>
+              </div>
+              <div class="balance-badge-corner">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="#0070BA" opacity="0.15"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14h-2v-2h2v2zm0-4h-2V7h2v5z"/></svg>
+              </div>
+            </div>
+
+            <div class="balance-card-actions">
+              <button type="button" class="btn btn-primary" id="transferFundsBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                <span>Transfer Funds</span>
+              </button>
+              <button type="button" class="btn btn-outline" id="directDepositBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span>Direct Deposit Info</span>
+              </button>
+            </div>
+
+            <div class="currencies-breakdown">
+              <div class="curr-item primary-curr">
+                <span class="curr-flag">🇺🇸</span>
+                <span class="curr-label">US Dollar (Primary)</span>
+                <span class="curr-amount" id="primaryCurrencyAmount">–</span>
+              </div>
+              <div class="curr-item">
+                <span class="curr-flag">🇪🇺</span>
+                <span class="curr-label">Euro</span>
+                <span class="curr-amount">€155.00</span>
+              </div>
+            </div>
+          </article>
+
+          <!-- 2. Wallet & Payment Methods Section (Cards, Debit Cards, Banks) -->
+          <article class="dash-card wallet-section-card" id="cardsSection">
+            <div class="section-card-header">
+              <div>
+                <h2 class="section-card-title">Banks and Cards</h2>
+                <p class="section-card-desc">Manage how you pay, transfer, and receive money</p>
+              </div>
+              <div class="header-action-group">
+                <button type="button" class="btn-text-link" id="manageAllCardsLink">Manage All</button>
+                <button type="button" class="btn btn-primary-sm" id="addDebitCardBtn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span>Add Debit Card</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Visual Physical Cards Showcase -->
+            <div class="cards-visual-carousel" id="cardsContainer">
+              
+              <!-- Card 1: PayPal Business / Personal Debit Card -->
+              <div class="payment-card-item card-theme-paypal-dark" tabindex="0">
+                <div class="card-inner-top">
+                  <div class="chip-container">
+                    <div class="emv-chip"></div>
+                    <svg class="contactless-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"><path d="M8.5 16.5a5 5 0 0 1 0-7"/><path d="M12 19a9 9 0 0 0 0-14"/><path d="M15.5 21.5a13 13 0 0 0 0-19"/></svg>
+                  </div>
+                  <span class="card-badge-pill">DEBIT</span>
+                </div>
+                <div class="card-number-preview">
+                  <span class="dots">&bull;&bull;&bull;&bull;</span>
+                  <span class="dots">&bull;&bull;&bull;&bull;</span>
+                  <span class="dots">&bull;&bull;&bull;&bull;</span>
+                  <span class="last-digits">4821</span>
+                </div>
+                <div class="card-inner-bottom">
+                  <div>
+                    <span class="card-holder-label">CARDHOLDER</span>
+                    <span class="card-holder-name">ALEX WALKER</span>
+                  </div>
+                  <div>
+                    <span class="card-exp-label">EXPIRES</span>
+                    <span class="card-exp-val">08/28</span>
+                  </div>
+                  <div class="network-logo mastercard-logo">
+                    <div class="mc-circle mc-red"></div>
+                    <div class="mc-circle mc-yellow"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 2: Visa Sapphire Preferred -->
+              <div class="payment-card-item card-theme-sapphire" tabindex="0">
+                <div class="card-inner-top">
+                  <div class="chip-container">
+                    <div class="emv-chip"></div>
+                    <svg class="contactless-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"><path d="M8.5 16.5a5 5 0 0 1 0-7"/><path d="M12 19a9 9 0 0 0 0-14"/><path d="M15.5 21.5a13 13 0 0 0 0-19"/></svg>
+                  </div>
+                  <span class="card-badge-pill preferred-pill">PREFERRED</span>
+                </div>
+                <div class="card-number-preview">
+                  <span class="dots">&bull;&bull;&bull;&bull;</span>
+                  <span class="dots">&bull;&bull;&bull;&bull;</span>
+                  <span class="dots">&bull;&bull;&bull;&bull;</span>
+                  <span class="last-digits">9102</span>
+                </div>
+                <div class="card-inner-bottom">
+                  <div>
+                    <span class="card-holder-label">CARDHOLDER</span>
+                    <span class="card-holder-name">ALEX WALKER</span>
+                  </div>
+                  <div>
+                    <span class="card-exp-label">EXPIRES</span>
+                    <span class="card-exp-val">11/27</span>
+                  </div>
+                  <div class="network-logo">
+                    <span class="visa-text">VISA</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 3: Link New Card Action Tile -->
+              <button type="button" class="link-card-action-tile" id="tileAddCardBtn">
+                <div class="tile-icon-circle">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0070BA" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </div>
+                <span class="tile-title">Link a Card or Bank</span>
+                <span class="tile-desc">Connect debit card, credit card, or checking account</span>
+              </button>
+
+            </div>
+
+            <!-- List of Linked Bank Accounts -->
+            <div class="linked-methods-list">
+              <div class="method-row-item">
+                <div class="method-icon-box bank-icon">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#003087" stroke-width="2"><path d="M3 21h18M3 10h18M5 10v11M9 10v11M15 10v11M19 10v11M12 2L2 7h20L12 2z"/></svg>
+                </div>
+                <div class="method-details">
+                  <div class="method-name-row">
+                    <span class="method-name">JPMorgan Chase &bull;&bull;&bull;&bull; 3481</span>
+                    <span class="badge-status-green">Checking &bull; Primary</span>
+                  </div>
+                  <span class="method-sub">Free instant transfers &amp; automatic sweep</span>
+                </div>
+                <div class="method-actions">
+                  <button type="button" class="btn-ghost-sm" id="manageBankBtn">Manage</button>
+                </div>
+              </div>
+
+              <div class="method-row-item">
+                <div class="method-icon-box card-icon">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0070BA" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                </div>
+                <div class="method-details">
+                  <div class="method-name-row">
+                    <span class="method-name">PayPal Debit Mastercard &bull;&bull;&bull;&bull; 4821</span>
+                    <span class="badge-status-blue">Debit Card</span>
+                  </div>
+                  <span class="method-sub">Get 1% cash back on eligible purchases</span>
+                </div>
+                <div class="method-actions">
+                  <button type="button" class="btn-ghost-sm" id="manageDebitBtn">Manage</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-footer-buttons">
+              <button type="button" class="btn btn-outline-pill" id="linkCardModalTrigger">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                <span>Link a Card</span>
+              </button>
+              <button type="button" class="btn btn-outline-pill" id="linkBankModalTrigger">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 10h18M5 10v11M9 10v11M15 10v11M19 10v11M12 2L2 7h20L12 2z"/></svg>
+                <span>Link a Bank</span>
+              </button>
+              <button type="button" class="btn btn-gold-pill" id="orderPayPalCardBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+                <span>Get a PayPal Debit Card</span>
+              </button>
+            </div>
+          </article>
+
+          <!-- 2.5 Vaults Section -->
+          <article class="dash-card vaults-section-card" id="vaultsSection">
+            <div class="section-card-header">
+              <div>
+                <h2 class="section-card-title">Vaults</h2>
+                <p class="section-card-desc">Set aside dedicated balances with budgets and spending policies</p>
+              </div>
+              <div class="header-action-group">
+                <span class="paypal-link-status" id="paypalLinkStatus"></span>
+                <button type="button" class="btn btn-primary-sm" id="createVaultBtn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span>Create</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Vaults List / Cards Container -->
+            <div class="vaults-grid" id="vaultsContainer">
+              <p class="vaults-empty" id="vaultsStatus">Loading your vaults…</p>
+            </div>
+
+            <!-- Expired and closed vaults: off the main list, kept here (nothing is deleted) -->
+            <details class="vault-history hidden" id="vaultHistory">
+              <summary>Vault history <span class="muted" id="vaultHistoryCount"></span></summary>
+              <ul class="vault-history-list" id="vaultHistoryList"></ul>
+            </details>
+          </article>
+
+          <!-- 3. Recent Activity & Transactions Feed -->
+          <article class="dash-card activity-feed-card" id="activitySection">
+            <div class="section-card-header">
+              <div>
+                <h2 class="section-card-title">Recent Activity</h2>
+                <p class="section-card-desc">Transactions, purchases, and incoming transfers</p>
+              </div>
+              <div class="header-action-group">
+                <div class="search-tx-wrapper">
+                  <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input type="text" class="search-tx-input" id="searchTxInput" placeholder="Search transactions...">
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity Filter Chips -->
+            <div class="filter-chips-row">
+              <button type="button" class="chip-btn active" data-filter="all">All</button>
+              <button type="button" class="chip-btn" data-filter="completed">Completed</button>
+              <button type="button" class="chip-btn" data-filter="received">Received</button>
+              <button type="button" class="chip-btn" data-filter="payments">Payments</button>
+            </div>
+
+            <!-- Transaction List -->
+            <div class="tx-list" id="transactionList">
+
+              <!-- TX Item 1 -->
+              <div class="tx-item" data-type="payment" tabindex="0">
+                <div class="tx-avatar tx-avatar-apple">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.35-.58.66-1.09 1.73-.95 2.76 1 .08 2.06-.51 2.68-1.26z"/></svg>
+                </div>
+                <div class="tx-info">
+                  <div class="tx-title-row">
+                    <span class="tx-merchant">Apple Services</span>
+                    <span class="tx-amount negative">-$14.99 USD</span>
+                  </div>
+                  <div class="tx-sub-row">
+                    <span class="tx-meta">Oct 21 &bull; Subscription (iCloud &amp; Music)</span>
+                    <span class="tx-status">Completed</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TX Item 2 -->
+              <div class="tx-item" data-type="received" tabindex="0">
+                <div class="tx-avatar tx-avatar-green">
+                  <span>SJ</span>
+                </div>
+                <div class="tx-info">
+                  <div class="tx-title-row">
+                    <span class="tx-merchant">Sarah Jenkins</span>
+                    <span class="tx-amount positive">+$75.00 USD</span>
+                  </div>
+                  <div class="tx-sub-row">
+                    <span class="tx-meta">Oct 20 &bull; "Dinner and taxi split"</span>
+                    <span class="tx-status badge-success">Received</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TX Item 3 -->
+              <div class="tx-item" data-type="payment" tabindex="0">
+                <div class="tx-avatar tx-avatar-brand">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M21.7 5.3c-.3-.2-.7-.1-.9.2l-10 13-4.5-4.5c-.3-.3-.7-.3-1 0s-.3.7 0 1l5 5c.1.1.3.2.5.2s.4-.1.5-.2l10.6-13.8c.2-.3.1-.7-.2-.9z"/></svg>
+                </div>
+                <div class="tx-info">
+                  <div class="tx-title-row">
+                    <span class="tx-merchant">Nike Online Store</span>
+                    <span class="tx-amount negative">-$128.50 USD</span>
+                  </div>
+                  <div class="tx-sub-row">
+                    <span class="tx-meta">Oct 19 &bull; Debit Card &bull;&bull;&bull;&bull; 4821</span>
+                    <span class="tx-status">Completed</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TX Item 4 -->
+              <div class="tx-item" data-type="received" tabindex="0">
+                <div class="tx-avatar tx-avatar-blue">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                </div>
+                <div class="tx-info">
+                  <div class="tx-title-row">
+                    <span class="tx-merchant">Studio Apex LLC</span>
+                    <span class="tx-amount positive">+$1,450.00 USD</span>
+                  </div>
+                  <div class="tx-sub-row">
+                    <span class="tx-meta">Oct 17 &bull; Invoice #INV-2024-88</span>
+                    <span class="tx-status badge-success">Received</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TX Item 5 -->
+              <div class="tx-item" data-type="payment" tabindex="0">
+                <div class="tx-avatar tx-avatar-uber">
+                  <span>UB</span>
+                </div>
+                <div class="tx-info">
+                  <div class="tx-title-row">
+                    <span class="tx-merchant">Uber Technologies</span>
+                    <span class="tx-amount negative">-$26.40 USD</span>
+                  </div>
+                  <div class="tx-sub-row">
+                    <span class="tx-meta">Oct 15 &bull; Ride payment</span>
+                    <span class="tx-status">Completed</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="activity-footer">
+              <button type="button" class="btn btn-outline btn-block" id="viewAllActivityBtn">
+                View All Activity
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <!-- ================= RIGHT COLUMN (Quick Contacts, Promotions & Security) ================= -->
+        <aside class="dash-col-secondary">
+
+          <!-- 1. Send Again / Quick Contacts -->
+          <article class="dash-card contacts-card">
+            <div class="section-card-header">
+              <h2 class="section-card-title-sm">Send Again</h2>
+              <button type="button" class="btn-text-link" id="viewContactsLink">All Contacts</button>
+            </div>
+            <div class="contacts-scroll-row">
+              <div class="contact-pill" tabindex="0" data-name="Sarah Jenkins">
+                <div class="contact-avatar av-green">SJ</div>
+                <span class="contact-name">Sarah</span>
+              </div>
+              <div class="contact-pill" tabindex="0" data-name="Marcus Vance">
+                <div class="contact-avatar av-purple">MV</div>
+                <span class="contact-name">Marcus</span>
+              </div>
+              <div class="contact-pill" tabindex="0" data-name="Elena Rostova">
+                <div class="contact-avatar av-orange">ER</div>
+                <span class="contact-name">Elena</span>
+              </div>
+              <div class="contact-pill" tabindex="0" data-name="David Kim">
+                <div class="contact-avatar av-blue">DK</div>
+                <span class="contact-name">David</span>
+              </div>
+              <button type="button" class="contact-add-btn" id="addNewContactBtn" title="Add recipient">
+                <div class="contact-avatar-add">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0070BA" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </div>
+                <span class="contact-name">New</span>
+              </button>
+            </div>
+          </article>
+
+          <!-- 2. Pay in 4 Promotional Banner -->
+          <article class="dash-card promo-card-payin4">
+            <div class="promo-content">
+              <div class="promo-badge">PAY IN 4</div>
+              <h3 class="promo-title">Split your purchases into 4</h3>
+              <p class="promo-desc">Shop interest-free payments on thousands of your favorite merchants with zero impact on credit score.</p>
+              <button type="button" class="btn btn-gold-sm" id="payIn4ExploreBtn">Learn How</button>
+            </div>
+            <div class="promo-visual">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="#003087"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+            </div>
+          </article>
+
+          <!-- 3. In-Store QR Code Feature -->
+          <article class="dash-card qr-card">
+            <div class="qr-info-row">
+              <div class="qr-details">
+                <h3 class="section-card-title-sm">Scan to Pay in Stores</h3>
+                <p class="section-card-desc">Touch-free payment with your PayPal mobile app</p>
+                <button type="button" class="btn-text-link" id="showQrCodeBtn">Display Your Code</button>
+              </div>
+              <div class="qr-mockup" aria-hidden="true">
+                <!-- Decorative QR Code Vector -->
+                <svg width="68" height="68" viewBox="0 0 100 100" fill="#003087">
+                  <rect x="0" y="0" width="30" height="30" rx="4"/>
+                  <rect x="6" y="6" width="18" height="18" fill="white" rx="2"/>
+                  <rect x="10" y="10" width="10" height="10" fill="#003087"/>
+                  
+                  <rect x="70" y="0" width="30" height="30" rx="4"/>
+                  <rect x="76" y="6" width="18" height="18" fill="white" rx="2"/>
+                  <rect x="80" y="10" width="10" height="10" fill="#003087"/>
+
+                  <rect x="0" y="70" width="30" height="30" rx="4"/>
+                  <rect x="6" y="76" width="18" height="18" fill="white" rx="2"/>
+                  <rect x="10" y="80" width="10" height="10" fill="#003087"/>
+
+                  <!-- Data dots -->
+                  <rect x="40" y="10" width="8" height="8"/>
+                  <rect x="52" y="10" width="8" height="8"/>
+                  <rect x="40" y="24" width="8" height="8"/>
+                  <rect x="40" y="40" width="8" height="8"/>
+                  <rect x="52" y="40" width="12" height="8"/>
+                  <rect x="70" y="40" width="8" height="8"/>
+                  <rect x="84" y="40" width="8" height="8"/>
+                  <rect x="10" y="45" width="12" height="8"/>
+                  <rect x="40" y="60" width="8" height="8"/>
+                  <rect x="55" y="60" width="8" height="14"/>
+                  <rect x="70" y="60" width="10" height="8"/>
+                  <rect x="85" y="75" width="8" height="8"/>
+                  <rect x="40" y="80" width="12" height="8"/>
+                  <rect x="65" y="80" width="8" height="8"/>
+                </svg>
+              </div>
+            </div>
+          </article>
+
+          <!-- 4. Security Status Widget -->
+          <article class="dash-card security-widget-card">
+            <div class="security-card-header">
+              <div class="sec-icon-circle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0070BA" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div>
+                <h3 class="section-card-title-sm">Security &amp; Protection</h3>
+                <span class="sec-status-text">Your wallet is protected</span>
+              </div>
+            </div>
+            <ul class="sec-checklist">
+              <li>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#007934"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                <span>2-Step Verification Enabled</span>
+              </li>
+              <li>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#007934"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                <span>PayPal Purchase Protection</span>
+              </li>
+              <li>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#007934"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                <span>Zero Liability for Unauthorized Charges</span>
+              </li>
+            </ul>
+          </article>
+
+        </aside>
+
+      </div>
+    </main>
+
+    <!-- Global Dashboard Footer -->
+    <footer class="dash-global-footer">
+      <div class="dash-nav-container footer-content">
+        <div class="footer-links-row">
+          <a href="javascript:void(0)">Help &amp; Contact</a>
+          <a href="javascript:void(0)">Security</a>
+          <a href="javascript:void(0)">Apps</a>
+          <a href="javascript:void(0)">Shop</a>
+          <a href="javascript:void(0)">Enterprise</a>
+          <a href="javascript:void(0)">Partners</a>
+        </div>
+        <p class="footer-copyright">&copy; 1999–2026 PayPal, Inc. All rights reserved. Privacy and Legal.</p>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 3. INTERACTIVE MODAL: ADD / LINK DEBIT OR CREDIT CARD -->
+  <!-- ========================================================================= -->
+  <dialog class="pp-dialog" id="addCardModal" aria-labelledby="addCardModalTitle">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <div class="dialog-header-left">
+          <h2 id="addCardModalTitle" class="dialog-title">Link a card</h2>
+          <p class="dialog-subtitle">Connect your debit or credit card to shop and send money securely.</p>
+        </div>
+        <button type="button" class="dialog-close-btn" id="closeCardModalBtn" aria-label="Close dialog">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- Real-time Interactive Card Preview -->
+      <div class="live-card-preview" id="previewCardElement">
+        <div class="card-inner-top">
+          <div class="chip-container">
+            <div class="emv-chip"></div>
+            <svg class="contactless-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"><path d="M8.5 16.5a5 5 0 0 1 0-7"/><path d="M12 19a9 9 0 0 0 0-14"/><path d="M15.5 21.5a13 13 0 0 0 0-19"/></svg>
+          </div>
+          <span class="card-badge-pill" id="previewCardTypeBadge">DEBIT</span>
+        </div>
+        <div class="card-number-preview">
+          <span id="previewCardNumber">•••• •••• •••• ••••</span>
+        </div>
+        <div class="card-inner-bottom">
+          <div>
+            <span class="card-holder-label">NAME ON CARD</span>
+            <span class="card-holder-name" id="previewCardName">ALEX WALKER</span>
+          </div>
+          <div>
+            <span class="card-exp-label">EXPIRES</span>
+            <span class="card-exp-val" id="previewCardExp">MM/YY</span>
+          </div>
+          <div class="network-logo" id="previewCardBrandLogo">
+            <span class="visa-text">VISA</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card Form -->
+      <form id="addCardForm" class="dialog-form" onsubmit="return false;">
+        
+        <!-- Card Number -->
+        <div class="form-group">
+          <label for="cardNumberInput" class="form-label">Debit or credit card number</label>
+          <div class="input-with-icon">
+            <input type="text" id="cardNumberInput" class="form-input" placeholder="0000 0000 0000 0000" maxlength="19" autocomplete="cc-number">
+            <div class="card-brand-icons">
+              <span class="brand-pill brand-visa">VISA</span>
+              <span class="brand-pill brand-mc">MC</span>
+              <span class="brand-pill brand-amex">AMEX</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Type & Name -->
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="cardTypeSelect" class="form-label">Card type</label>
+            <select id="cardTypeSelect" class="form-select">
+              <option value="Debit" selected>Debit Card</option>
+              <option value="Credit">Credit Card</option>
+              <option value="Prepaid">Prepaid Card</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="cardNameInput" class="form-label">Name on card</label>
+            <input type="text" id="cardNameInput" class="form-input" value="Alex Walker" placeholder="Full Name">
+          </div>
+        </div>
+
+        <!-- Expiration & Security Code -->
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="cardExpInput" class="form-label">Expiration date</label>
+            <input type="text" id="cardExpInput" class="form-input" placeholder="MM/YY" maxlength="5">
+          </div>
+          <div class="form-group">
+            <label for="cardCvvInput" class="form-label">Security code (CSC / CVV)</label>
+            <div class="input-with-icon">
+              <input type="password" id="cardCvvInput" class="form-input" placeholder="3 or 4 digits" maxlength="4">
+              <span class="input-help-icon" title="3-digit code on back or 4-digit code on front">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Billing Address -->
+        <div class="form-group">
+          <label for="cardAddressSelect" class="form-label">Billing address</label>
+          <select id="cardAddressSelect" class="form-select">
+            <option value="1">742 Evergreen Terrace, Springfield, OR 97477</option>
+            <option value="2">100 Market St, Suite 400, San Francisco, CA 94105</option>
+            <option value="new">+ Add a new billing address</option>
+          </select>
+        </div>
+
+        <!-- Preferred toggle -->
+        <label class="custom-checkbox-row">
+          <input type="checkbox" id="preferredCardCheck" checked>
+          <span class="checkmark-box"></span>
+          <span class="checkbox-label-text">Set as preferred payment method for online purchases</span>
+        </label>
+
+        <!-- Actions -->
+        <div class="dialog-actions-row">
+          <button type="button" class="btn btn-secondary" id="cancelCardModalBtn">Cancel</button>
+          <button type="button" class="btn btn-primary" id="saveCardBtn">Link Card</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- ========================================================================= -->
+  <!-- 4. INTERACTIVE MODAL: TRANSFER FUNDS -->
+  <!-- ========================================================================= -->
+  <dialog class="pp-dialog" id="transferModal" aria-labelledby="transferModalTitle">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <h2 id="transferModalTitle" class="dialog-title">Transfer money out</h2>
+        <button type="button" class="dialog-close-btn" id="closeTransferModalBtn" aria-label="Close dialog">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      
+      <div class="transfer-options-list">
+        <label class="transfer-option-card selected">
+          <input type="radio" name="transferDest" value="instant" checked>
+          <div class="option-content">
+            <div class="opt-header">
+              <span class="opt-title">In minutes to debit card</span>
+              <span class="opt-fee">1.75% fee</span>
+            </div>
+            <p class="opt-desc">PayPal Debit Mastercard (&bull;&bull;&bull;&bull; 4821)</p>
+          </div>
+        </label>
+
+        <label class="transfer-option-card">
+          <input type="radio" name="transferDest" value="standard">
+          <div class="option-content">
+            <div class="opt-header">
+              <span class="opt-title">1–3 business days</span>
+              <span class="opt-free">FREE</span>
+            </div>
+            <p class="opt-desc">Chase Checking (&bull;&bull;&bull;&bull; 3481)</p>
+          </div>
+        </label>
+      </div>
+
+      <div class="form-group transfer-amt-group">
+        <label for="transferAmountInput" class="form-label">Transfer amount ($ USD)</label>
+        <div class="input-with-prefix">
+          <span class="prefix-symbol">$</span>
+          <input type="number" id="transferAmountInput" class="form-input amt-input" value="250.00" min="1" max="4820">
+        </div>
+      </div>
+
+      <div class="dialog-actions-row">
+        <button type="button" class="btn btn-secondary" id="cancelTransferBtn">Cancel</button>
+        <button type="button" class="btn btn-primary" id="confirmTransferBtn">Continue</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ========================================================================= -->
+  <!-- 5. INTERACTIVE MODAL: SEND & REQUEST MONEY -->
+  <!-- ========================================================================= -->
+  <dialog class="pp-dialog" id="sendModal" aria-labelledby="sendModalTitle">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <h2 id="sendModalTitle" class="dialog-title">Send money to anyone</h2>
+        <button type="button" class="dialog-close-btn" id="closeSendModalBtn" aria-label="Close dialog">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      
+      <form class="dialog-form" onsubmit="return false;">
+        <div class="form-group">
+          <label for="sendRecipientInput" class="form-label">Name, @username, email, or mobile</label>
+          <input type="text" id="sendRecipientInput" class="form-input" placeholder="e.g. sarah@example.com or @sarah" value="sarah@example.com">
+        </div>
+
+        <div class="form-group">
+          <label for="sendAmountInput" class="form-label">Amount ($ USD)</label>
+          <div class="input-with-prefix">
+            <span class="prefix-symbol">$</span>
+            <input type="number" id="sendAmountInput" class="form-input amt-input" value="45.00" min="1">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="sendNoteInput" class="form-label">What's this for? (Optional)</label>
+          <input type="text" id="sendNoteInput" class="form-input" placeholder="Add a note or message" value="Lunch pizza & drinks">
+        </div>
+
+        <div class="payment-type-selector">
+          <label class="pay-type-opt selected">
+            <input type="radio" name="payType" value="friends" checked>
+            <span>Friends &amp; Family (No fee)</span>
+          </label>
+          <label class="pay-type-opt">
+            <input type="radio" name="payType" value="goods">
+            <span>Goods &amp; Services (Protected)</span>
+          </label>
+        </div>
+
+        <div class="dialog-actions-row">
+          <button type="button" class="btn btn-secondary" id="cancelSendBtn">Cancel</button>
+          <button type="button" class="btn btn-primary" id="confirmSendBtn">Send Payment</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- ========================================================================= -->
+  <!-- 6. INTERACTIVE MODAL: CREATE VAULT -->
+  <!-- ========================================================================= -->
+  <dialog class="pp-dialog" id="createVaultModal" aria-labelledby="createVaultModalTitle">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <div class="dialog-header-left">
+          <h2 id="createVaultModalTitle" class="dialog-title">Create a Vault</h2>
+          <p class="dialog-subtitle" id="vaultStepSubtitle">Put money aside and tell the AI what it is for.</p>
+        </div>
+        <button type="button" class="dialog-close-btn" id="closeVaultModalBtn" aria-label="Close dialog">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- Step 1: describe -->
+      <form id="vaultStepDescribe" class="dialog-form">
+        <div class="form-group">
+          <label for="vaultAmountInput" class="form-label">1. Amount ($ USD)</label>
+          <div class="input-with-prefix">
+            <span class="prefix-symbol">$</span>
+            <input type="number" id="vaultAmountInput" class="form-input amt-input" placeholder="50.00" min="1" max="10000" step="0.01" required>
+          </div>
+          <span class="vault-input-hint" id="vaultAmountHint">This much is taken from your PayPal balance and locked in the vault.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="vaultDescInput" class="form-label">2. What should the AI do with it?</label>
+          <textarea id="vaultDescInput" class="form-input vault-desc-textarea" rows="3" placeholder="e.g. Buy noise-cancelling headphones before Sunday, max $45, only from BestBuy" required></textarea>
+          <span class="vault-input-hint">Plain English. Limits, shops, deadline: the AI turns it into rules it can never break.</span>
+        </div>
+
+        <p class="form-error hidden" id="vaultDescribeError" role="alert"></p>
+
+        <div class="dialog-actions-row">
+          <button type="button" class="btn btn-secondary" id="cancelVaultModalBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="vaultContinueBtn">Continue</button>
+        </div>
+      </form>
+
+      <!-- Step 2: review the AI policy, confirm with password -->
+      <form id="vaultStepReview" class="dialog-form hidden">
+        <dl class="vault-review" id="vaultReview"></dl>
+        <ul class="vault-warnings hidden" id="vaultWarnings"></ul>
+
+        <div class="vault-link-box hidden" id="vaultLinkBox"></div> <!-- filled by app.js (renderReview) -->
+
+        <div class="form-group" id="vaultPasswordGroup">
+          <label for="vaultPasswordInput" class="form-label">Confirm with your password</label>
+          <input type="password" id="vaultPasswordInput" class="form-input" autocomplete="current-password" placeholder="Password">
+        </div>
+
+        <p class="form-error hidden" id="vaultReviewError" role="alert"></p>
+
+        <div class="dialog-actions-row">
+          <button type="button" class="btn btn-secondary" id="vaultBackBtn">Back</button>
+          <button type="submit" class="btn btn-primary" id="vaultPayBtn">Pay &amp; create vault</button>
+        </div>
+      </form>
+
+      <!-- Step 3: progress -->
+      <div id="vaultStepProgress" class="dialog-form hidden">
+        <ol class="vault-progress-steps" id="vaultProgress"></ol>
+        <div class="dialog-actions-row">
+          <button type="button" class="btn btn-primary hidden" id="vaultDoneBtn">Open vault</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="pp-dialog vault-detail-dialog" id="vaultDetailModal" aria-labelledby="vdTitle">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <div class="dialog-header-left">
+          <h2 id="vdTitle" class="dialog-title">Vault</h2>
+          <p class="dialog-subtitle" id="vdSubtitle"></p>
+        </div>
+        <button type="button" class="dialog-close-btn" id="closeVaultDetailBtn" aria-label="Close dialog">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="vdBody" class="vd-body"></div>
+    </div>
+  </dialog>
+
+  <!-- Notification Toast Container -->
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

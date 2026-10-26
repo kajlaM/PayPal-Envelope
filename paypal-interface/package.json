@@ -1,0 +1,8 @@
+{
+  "name": "paypal-interface",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx server.ts"
+  }
+}

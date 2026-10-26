@@ -54,7 +54,7 @@ export type Decision = {
   requestJson: SpendRequest;
   result: 'APPROVE' | 'BLOCK' | 'NEEDS_HUMAN';
   reasons: string[];
-  resolvedBy: 'APPROVED_BY_HUMAN' | 'REJECTED_BY_HUMAN' | null;
+  resolvedBy: 'APPROVED_BY_HUMAN' | 'REJECTED_BY_HUMAN' | 'CANCELLED_POLICY_CHANGED' | null;
   createdAt: string;
 };
 

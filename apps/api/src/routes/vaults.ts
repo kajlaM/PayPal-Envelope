@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { LedgerError, prisma, startFunding, startLiquidation } from '@kubepay/db';
+import { changeVaultPolicy, LedgerError, prisma, startFunding, startLiquidation } from '@kubepay/db';
 import { createOrder, getSubscription } from '@kubepay/paypal';
 import {
   compilePolicy, evaluate, PolicyCompileError, PolicySchema, SpendRequestSchema, toCents, type Policy,
 } from '@kubepay/policy';
 import { emit } from '../events.ts';
 import { HttpError, requireInternalKey } from '../http.ts';
-import { runAgentForVault, startWatching, stopWatching } from '../services/agent-runs.ts';
+import { runAgentForVault, runUsesOldPolicy, startWatching, stopWatching } from '../services/agent-runs.ts';
 import { finishFunding } from '../services/funding.ts';
 import { executeSpend } from '../services/spend.ts';
 import { payOutLiquidation, syncPendingPayouts } from '../services/payouts.ts';
@@ -28,21 +28,37 @@ async function loadVault(id: string) {
 // ---------- Read ----------
 
 vaultsRouter.get('/', async (_req, res) => {
-  const vaults = await prisma.vault.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: { policies: { orderBy: { version: 'desc' }, take: 1 } },
-  });
-  res.json(vaults.map(({ policies, ...v }) => ({ ...v, policy: policies[0]?.policyJson })));
+  const [vaults, sums] = await Promise.all([
+    prisma.vault.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { policies: { orderBy: { version: 'desc' }, take: 1 } },
+    }),
+    // Money in / out per vault, for summaries (vault history). Failed entries never moved money.
+    prisma.ledgerEntry.groupBy({ by: ['vaultId', 'type'], where: { status: { not: 'FAILED' } }, _sum: { amountCents: true } }),
+  ]);
+  const total = (vaultId: string, type: 'FUND' | 'SPEND' | 'LIQUIDATE') =>
+    sums.find((row) => row.vaultId === vaultId && row.type === type)?._sum.amountCents ?? 0;
+  res.json(vaults.map(({ policies, ...v }) => ({
+    ...v,
+    policy: policies[0]?.policyJson,
+    policyVersion: policies[0]?.version,
+    totals: { paidInCents: total(v.id, 'FUND'), spentCents: total(v.id, 'SPEND'), refundedCents: total(v.id, 'LIQUIDATE') },
+  })));
 });
 
 vaultsRouter.get('/:id', async (req, res) => {
   const { vault, policy } = await loadVault(req.params.id);
-  const [ledger, decisions] = await Promise.all([
+  const [ledger, decisions, policyHistory] = await Promise.all([
     prisma.ledgerEntry.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' }, include: { merchant: true } }),
     prisma.decision.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' } }),
+    prisma.policy.findMany({
+      where: { vaultId: vault.id },
+      orderBy: { version: 'desc' },
+      select: { version: true, createdAt: true, sourceText: true, policyJson: true },
+    }),
   ]);
   const { policies, ...rest } = vault;
-  res.json({ ...rest, policy, ledger, decisions });
+  res.json({ ...rest, policy, ledger, decisions, policyHistory });
 });
 
 // ---------- Create ----------
@@ -89,6 +105,84 @@ vaultsRouter.post('/', async (req, res) => {
   });
   emit('vault:updated', { vaultId: vault.id });
   res.status(201).json(vault);
+});
+
+// ---------- Change policy ----------
+
+// The user changed what an active vault is for, and maybe its amount. Saved as the next policy
+// version (earlier versions stay as history). A lower amount refunds the difference right away;
+// a higher amount must be paid in first (FUND entry for the difference). `dryRun` only checks the
+// change and says how much money moves.
+const ChangePolicyBody = z.object({
+  policy: PolicySchema,
+  sourceText: z.string().max(1000).optional(),
+  dryRun: z.boolean().optional(),
+});
+
+const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+vaultsRouter.post('/:id/policy', async (req, res) => {
+  const body = ChangePolicyBody.parse(req.body);
+  const { vault, policy: current } = await loadVault(req.params.id);
+  const next: Policy = body.policy;
+
+  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active vault can be changed.' });
+  if (next.vault_type !== current.vault_type) {
+    const kind = current.vault_type === 'UTILITY' ? 'bill-payment' : 'shopping';
+    throw new HttpError(400, 'VAULT_TYPE_CHANGED', { message: `This is a ${kind} vault. Describe a ${kind} task, or create a new vault.` });
+  }
+  if (new Date(next.rules.expiry_timestamp) <= new Date()) throw new HttpError(400, 'EXPIRY_IN_PAST', { message: 'The new end date is in the past.' });
+  if (next.rules.max_single_transaction > next.allocated_budget) throw new HttpError(400, 'MAX_TX_ABOVE_BUDGET');
+
+  const budgetCents = toCents(next.allocated_budget);
+  const spentCents = vault.budgetCents - vault.balanceCents; // includes payments still in flight
+  if (budgetCents < spentCents) {
+    throw new HttpError(409, 'AMOUNT_BELOW_SPENT', { message: `This vault already spent ${dollars(spentCents)}, so its amount can't go below that.` });
+  }
+  const changeCents = budgetCents - vault.budgetCents;
+  if (body.dryRun) return res.json({ changeCents, budgetCents, spentCents });
+
+  const saved = await changeVaultPolicy(vault.id, {
+    policyJson: next,
+    sourceText: body.sourceText,
+    name: next.vault_name,
+    expiresAt: new Date(next.rules.expiry_timestamp),
+    budgetCents,
+  }).catch((err) => {
+    if (err instanceof LedgerError && err.code === 'PENDING_SPENDS') {
+      throw new HttpError(409, 'PAYMENT_IN_FLIGHT', { message: 'A payment from this vault is still in progress. Try again in a minute.' });
+    }
+    if (err instanceof LedgerError && err.code === 'TOP_UP_NOT_PAID') {
+      throw new HttpError(402, 'TOP_UP_NOT_PAID', { message: `Pay the extra ${dollars(changeCents)} into the vault first.` });
+    }
+    throw err;
+  });
+
+  // Purchases waiting for approval were found under the old rules.
+  const cancelled = await prisma.decision.updateMany({
+    where: { vaultId: vault.id, result: 'NEEDS_HUMAN', resolvedBy: null },
+    data: { resolvedBy: 'CANCELLED_POLICY_CHANGED' },
+  });
+
+  let refundError: string | undefined;
+  if (saved.refund) {
+    // A rejected payout puts the money (and the amount) back into the vault (failOutflow).
+    await payOutLiquidation(saved.refund.id).catch((err) => {
+      refundError = err instanceof Error ? err.message : String(err);
+    });
+  }
+
+  await startWatching(vault.id); // shopping vaults: the agent looks again, with the new rules
+  emit('vault:updated', { vaultId: vault.id });
+  emit('ledger:updated', { vaultId: vault.id });
+  res.json({
+    vault: await prisma.vault.findUniqueOrThrow({ where: { id: vault.id } }),
+    version: saved.policy.version,
+    changeCents,
+    refund: saved.refund,
+    refundError,
+    cancelledApprovals: cancelled.count,
+  });
 });
 
 // ---------- Fund (Orders API + JS SDK button) ----------
@@ -145,7 +239,10 @@ vaultsRouter.post('/:id/subscribe/confirm', async (req, res) => {
 vaultsRouter.post<{ id: string }>('/:id/spend', requireInternalKey, async (req, res) => {
   const request = SpendRequestSchema.parse(req.body);
   const { vault, policy } = await loadVault(req.params.id);
-  const verdict = evaluate(vault, policy, request, await buildEngineContext(vault, request));
+  // The user changed the rules while this agent run was searching: it was looking for the old thing.
+  const verdict = runUsesOldPolicy(vault.id, vault.policies[0]?.version ?? 0)
+    ? { result: 'BLOCK' as const, reasons: ['POLICY_CHANGED'] }
+    : evaluate(vault, policy, request, await buildEngineContext(vault, request));
 
   let decision = await prisma.decision.create({
     data: { vaultId: vault.id, requestJson: request, result: verdict.result, reasons: verdict.reasons },
