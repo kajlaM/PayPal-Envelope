@@ -11,6 +11,7 @@ const HOUR = 3_600_000;
 
 const statusColor: Record<Vault['status'], string> = {
   PENDING_FUNDING: 'orange',
+  SAVING: 'violet',
   ACTIVE: 'blue',
   EXPIRED: 'gray',
   LIQUIDATED: 'green',

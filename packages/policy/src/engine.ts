@@ -1,12 +1,13 @@
 import { isCategoryAllowed } from './categories.ts';
-import { toCents, type Decision, type Policy, type SpendRequest } from './schema.ts';
+import { itemProgress, listItems } from './shopping-list.ts';
+import { controlMode, toCents, type Decision, type Policy, type SpendRequest } from './schema.ts';
 
 // Policy Engine (Step 7): deterministic checks only. The LLM never decides.
 // Pure function: the API gathers the context (ledger history, invoice, anomaly score) and passes it in,
 // so every rule is unit tested without a database or PayPal.
 
 export type VaultSnapshot = {
-  type: 'SHOPPING' | 'UTILITY';
+  type: 'SHOPPING' | 'UTILITY' | 'SAVINGS';
   status: string;
   balanceCents: number;
   expiresAt: Date;
@@ -27,6 +28,8 @@ export type EngineContext = {
   };
   /** 0 (normal) .. 1 (very unusual), from Elastic (Step 11). */
   anomalyScore?: number;
+  /** Shopping-list vaults: per item id, money spent on it (payments that did not fail). */
+  itemSpentCents?: Record<string, number>;
 };
 
 /** Hard reasons always block. Soft reasons send the payment to a human instead. */
@@ -35,6 +38,7 @@ export const SOFT_REASONS = [
   'PRICE_NOT_VERIFIED',
   'POSSIBLE_DUPLICATE',
   'UNUSUAL_SPEND',
+  'OWNER_APPROVAL_REQUIRED',
 ] as const;
 
 const ANOMALY_THRESHOLD = 0.8;
@@ -46,7 +50,8 @@ export function evaluate(
   policy: Policy,
   req: SpendRequest,
   ctx: EngineContext,
-  opts: { now?: Date; ignoreSoft?: boolean } = {},
+  /** ownerChose: the owner picked this exact purchase (Ask me), so the control setting is satisfied. */
+  opts: { now?: Date; ignoreSoft?: boolean; ownerChose?: boolean } = {},
 ): Decision {
   const now = opts.now ?? new Date();
   const hard: string[] = [];
@@ -55,8 +60,9 @@ export function evaluate(
   const { rules } = policy;
   const lower = (list: string[]) => list.map((s) => s.toLowerCase());
 
-  // 1. Vault state
-  if (vault.status !== 'ACTIVE') hard.push('VAULT_INACTIVE');
+  // 1. Vault state (a vault still being paid into over time is SAVING, not ACTIVE: no spending yet)
+  if (vault.type === 'SAVINGS') hard.push('SAVINGS_VAULT');
+  if (vault.status !== 'ACTIVE') hard.push(vault.status === 'SAVING' ? 'STILL_SAVING' : 'VAULT_INACTIVE');
   if (vault.expiresAt <= now) hard.push('VAULT_EXPIRED');
 
   // 2-3. Money
@@ -93,6 +99,15 @@ export function evaluate(
     }
   }
 
+  // 8b. Shopping list: name an item on the list, not bought yet, within what it may cost now
+  if (vault.type === 'SHOPPING' && listItems(policy).length > 0) {
+    const item = itemProgress(policy, vault.balanceCents, ctx.itemSpentCents ?? {}).find((i) => i.id === req.item_id);
+    if (!req.item_id) hard.push('ITEM_REQUIRED');
+    else if (!item) hard.push('UNKNOWN_ITEM');
+    else if (item.bought) hard.push('ITEM_ALREADY_BOUGHT');
+    else if (amountCents > item.limitCents) hard.push('ITEM_LIMIT_EXCEEDED');
+  }
+
   // 9. Same merchant + same amount in the last 10 minutes: agent may be looping
   const duplicate = ctx.recentSpends.some(
     (s) =>
@@ -105,9 +120,13 @@ export function evaluate(
   // 10. Unusual compared with this vault's history (Elastic, Step 11)
   if ((ctx.anomalyScore ?? 0) >= ANOMALY_THRESHOLD) soft.push('UNUSUAL_SPEND');
 
-  // 11. Human approval threshold
-  if (rules.human_approval_above !== undefined && amountCents > toCents(rules.human_approval_above)) {
-    soft.push('ABOVE_HUMAN_APPROVAL_THRESHOLD');
+  // 11. Control setting: Ask me never buys alone, Ask above $X asks above the threshold, Autopilot never asks
+  const mode = controlMode(policy);
+  if (!opts.ownerChose) {
+    if (mode === 'ASK_ME') soft.push('OWNER_APPROVAL_REQUIRED');
+    else if (mode === 'ASK_ABOVE' && rules.human_approval_above !== undefined && amountCents > toCents(rules.human_approval_above)) {
+      soft.push('ABOVE_HUMAN_APPROVAL_THRESHOLD');
+    }
   }
 
   if (hard.length > 0) return { result: 'BLOCK', reasons: hard };

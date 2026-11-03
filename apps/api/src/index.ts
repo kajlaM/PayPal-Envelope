@@ -8,6 +8,7 @@ import { setSocketServer } from './events.ts';
 import { errorHandler, requireInternalKey } from './http.ts';
 import { auditRouter } from './routes/audit.ts';
 import { demoStoreRouter } from './routes/demo-store.ts';
+import { fundRequestsRouter } from './routes/fund-requests.ts';
 import { vaultsRouter } from './routes/vaults.ts';
 import { startAuditLog } from './services/audit.ts';
 import { startNotifications } from './services/notify.ts';
@@ -23,6 +24,7 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 app.use('/api/vaults', vaultsRouter);
+app.use('/api/fund-requests', fundRequestsRouter);
 app.use('/demo-store', demoStoreRouter);
 app.use('/api/audit', auditRouter);
 // One background tick (sweeper + agent watch) for a cron job; the server also runs it every minute.

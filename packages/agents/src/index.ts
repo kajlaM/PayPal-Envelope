@@ -12,5 +12,6 @@ export type { ShoppingOutcome } from './shopping.ts';
 /** Runs the right agent for the vault: shopping for SHOPPING, bill-pay for UTILITY. */
 export async function runVaultAgent(input: { vaultId: string; task?: string; onStep?: (s: AgentStep) => void }) {
   const vault = await getVault(input.vaultId);
+  if (vault.type === 'SAVINGS') throw new Error('A savings vault has no agent: it only saves');
   return vault.type === 'UTILITY' ? runBillPayAgent(input) : runShoppingAgent(input);
 }

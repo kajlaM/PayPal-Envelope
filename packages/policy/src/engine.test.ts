@@ -108,3 +108,23 @@ test('category tree: child allowed under parent, not parent under child', () => 
   assert.ok(!isCategoryAllowed('Electronics', ['Audio']));
   assert.ok(!isCategoryAllowed('Groceries', ['Electronics']));
 });
+
+test('control setting: Ask me never buys alone, Autopilot ignores the threshold, old vaults ask above $X', () => {
+  const askMe = run({ policy: policy({ control_mode: 'ASK_ME' }) });
+  assert.deepEqual(askMe, { result: 'NEEDS_HUMAN', reasons: ['OWNER_APPROVAL_REQUIRED'] });
+  // The owner picked this exact purchase from the agent's options: it goes through.
+  assert.equal(evaluate(shopVault, policy({ control_mode: 'ASK_ME' }), req(), ctx(), { now, ownerChose: true }).result, 'APPROVE');
+
+  assert.equal(run({ policy: policy({ control_mode: 'AUTOPILOT', human_approval_above: 30 }) }).result, 'APPROVE');
+  assert.deepEqual(run({ policy: policy({ control_mode: 'ASK_ABOVE', human_approval_above: 30 }) }).reasons, ['ABOVE_HUMAN_APPROVAL_THRESHOLD']);
+  assert.equal(run({ policy: policy({ control_mode: 'ASK_ABOVE' }) }).result, 'APPROVE'); // no threshold: never asks
+  assert.deepEqual(run({ policy: policy({ human_approval_above: 30 }) }).reasons, ['ABOVE_HUMAN_APPROVAL_THRESHOLD']); // no mode = ASK_ABOVE
+});
+
+test('control setting never hides safety flags or hard rules', () => {
+  const auto = policy({ control_mode: 'AUTOPILOT' });
+  assert.deepEqual(run({ policy: auto, req: req({ verified_price: undefined }) }).reasons, ['PRICE_NOT_VERIFIED']);
+  assert.deepEqual(run({ policy: auto, ctx: ctx({ anomalyScore: 0.95 }) }).reasons, ['UNUSUAL_SPEND']);
+  const chosen = evaluate(shopVault, policy({ control_mode: 'ASK_ME' }), req({ amount: 46, verified_price: 46 }), ctx(), { now, ownerChose: true });
+  assert.deepEqual(chosen, { result: 'BLOCK', reasons: ['MAX_LIMIT_EXCEEDED'] });
+});

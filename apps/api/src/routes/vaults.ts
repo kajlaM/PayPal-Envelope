@@ -3,15 +3,19 @@ import { z } from 'zod';
 import { changeVaultPolicy, LedgerError, prisma, startFunding, startLiquidation } from '@kubepay/db';
 import { createOrder, getSubscription } from '@kubepay/paypal';
 import {
-  compilePolicy, evaluate, PolicyCompileError, PolicySchema, SpendRequestSchema, toCents, type Policy,
+  compilePolicy, CreateProposalSchema, evaluate, itemProgress, listItems, PolicyCompileError, PolicySchema, ProposalOptionSchema,
+  savingsSchedule, SpendRequestSchema, toCents, type Policy, type SpendRequest,
 } from '@kubepay/policy';
 import { emit } from '../events.ts';
 import { HttpError, requireInternalKey } from '../http.ts';
-import { runAgentForVault, runUsesOldPolicy, startWatching, stopWatching } from '../services/agent-runs.ts';
+import { continueShoppingList, runAgentForVault, runUsesOldPolicy, startWatching, stopWatching } from '../services/agent-runs.ts';
+import { syncPendingCheckouts } from '../services/checkout.ts';
 import { finishFunding } from '../services/funding.ts';
-import { executeSpend } from '../services/spend.ts';
+import { cancelFundRequest, createFundRequest, syncFundRequests } from '../services/fund-requests.ts';
+import { decideAndSpend, executeSpend } from '../services/spend.ts';
 import { payOutLiquidation, syncPendingPayouts } from '../services/payouts.ts';
-import { buildEngineContext } from '../services/policy-context.ts';
+import { buildEngineContext, itemSpentCents } from '../services/policy-context.ts';
+import { chargeSavingsPayment, pauseSavings, resumeSavings, savingsSummary } from '../services/savings.ts';
 
 export const vaultsRouter = Router();
 
@@ -28,13 +32,15 @@ async function loadVault(id: string) {
 // ---------- Read ----------
 
 vaultsRouter.get('/', async (_req, res) => {
-  const [vaults, sums] = await Promise.all([
+  const [vaults, sums, open] = await Promise.all([
     prisma.vault.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { policies: { orderBy: { version: 'desc' }, take: 1 } },
+      include: { policies: { orderBy: { version: 'desc' }, take: 1 }, fundRequests: { where: { status: 'OPEN' } } },
     }),
     // Money in / out per vault, for summaries (vault history). Failed entries never moved money.
     prisma.ledgerEntry.groupBy({ by: ['vaultId', 'type'], where: { status: { not: 'FAILED' } }, _sum: { amountCents: true } }),
+    // Ask me vaults: options waiting for the owner to pick one.
+    prisma.proposal.groupBy({ by: ['vaultId'], where: { status: 'OPEN' }, _count: { _all: true } }),
   ]);
   const total = (vaultId: string, type: 'FUND' | 'SPEND' | 'LIQUIDATE') =>
     sums.find((row) => row.vaultId === vaultId && row.type === type)?._sum.amountCents ?? 0;
@@ -43,12 +49,13 @@ vaultsRouter.get('/', async (_req, res) => {
     policy: policies[0]?.policyJson,
     policyVersion: policies[0]?.version,
     totals: { paidInCents: total(v.id, 'FUND'), spentCents: total(v.id, 'SPEND'), refundedCents: total(v.id, 'LIQUIDATE') },
+    openProposals: open.find((row) => row.vaultId === v.id)?._count._all ?? 0,
   })));
 });
 
 vaultsRouter.get('/:id', async (req, res) => {
   const { vault, policy } = await loadVault(req.params.id);
-  const [ledger, decisions, policyHistory] = await Promise.all([
+  const [ledger, decisions, policyHistory, proposals, spentByItem, fundRequests] = await Promise.all([
     prisma.ledgerEntry.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' }, include: { merchant: true } }),
     prisma.decision.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' } }),
     prisma.policy.findMany({
@@ -56,9 +63,23 @@ vaultsRouter.get('/:id', async (req, res) => {
       orderBy: { version: 'desc' },
       select: { version: true, createdAt: true, sourceText: true, policyJson: true },
     }),
+    prisma.proposal.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' }, take: 20 }),
+    itemSpentCents(vault.id),
+    prisma.fundRequest.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' }, take: 10 }),
   ]);
+  const savings = await savingsSummary(vault);
+  // Shopping lists: each item's limit right now, what it cost, and whether it waits for the owner.
+  const names = new Map(listItems(policy).map((i) => [i.id, i.name]));
+  const waiting = (itemId: string) =>
+    proposals.some((p) => p.status === 'OPEN' && p.itemId === itemId) ? 'OPTIONS'
+      : decisions.some((d) => d.result === 'NEEDS_HUMAN' && !d.resolvedBy && (d.requestJson as SpendRequest)?.item_id === itemId) ? 'APPROVAL'
+        : null;
+  const items = itemProgress(policy, vault.balanceCents, spentByItem).map((i) => ({ ...i, waiting: i.bought ? null : waiting(i.id) }));
   const { policies, ...rest } = vault;
-  res.json({ ...rest, policy, ledger, decisions, policyHistory });
+  res.json({
+    ...rest, policy, ledger, decisions, policyHistory, items, savings, fundRequests,
+    proposals: proposals.map((p) => ({ ...p, itemName: p.itemId ? names.get(p.itemId) ?? p.itemId : null })),
+  });
 });
 
 // ---------- Create ----------
@@ -88,6 +109,13 @@ vaultsRouter.post('/', async (req, res) => {
 
   if (new Date(policy.rules.expiry_timestamp) <= new Date()) throw new HttpError(400, 'EXPIRY_IN_PAST');
   if (policy.rules.max_single_transaction > policy.allocated_budget) throw new HttpError(400, 'MAX_TX_ABOVE_BUDGET');
+  // Paying in over time: the vault must last until the last planned payment.
+  if (policy.savings) {
+    const { lastPaymentAt } = savingsSchedule(toCents(policy.allocated_budget), policy.savings, new Date());
+    if (new Date(policy.rules.expiry_timestamp) <= lastPaymentAt) {
+      throw new HttpError(400, 'EXPIRY_BEFORE_LAST_PAYMENT', { message: 'The vault must last until the last savings payment.' });
+    }
+  }
 
   const user = body.userId
     ? await prisma.user.findUniqueOrThrow({ where: { id: body.userId } })
@@ -100,6 +128,7 @@ vaultsRouter.post('/', async (req, res) => {
       type: policy.vault_type,
       budgetCents: toCents(policy.allocated_budget),
       expiresAt: new Date(policy.rules.expiry_timestamp),
+      ...(policy.savings ? { savingsPerPaymentCents: toCents(policy.savings.amount_per_payment), savingsEvery: policy.savings.every } : {}),
       policies: { create: { version: 1, policyJson: policy, sourceText: body.sourceText } },
     },
   });
@@ -124,7 +153,7 @@ const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 vaultsRouter.post('/:id/policy', async (req, res) => {
   const body = ChangePolicyBody.parse(req.body);
   const { vault, policy: current } = await loadVault(req.params.id);
-  const next: Policy = body.policy;
+  const next: Policy = { ...body.policy, savings: current.savings }; // the payment plan is fixed once saving started
 
   if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active vault can be changed.' });
   if (next.vault_type !== current.vault_type) {
@@ -158,11 +187,12 @@ vaultsRouter.post('/:id/policy', async (req, res) => {
     throw err;
   });
 
-  // Purchases waiting for approval were found under the old rules.
+  // Purchases waiting for approval, and options waiting for a pick, were found under the old rules.
   const cancelled = await prisma.decision.updateMany({
     where: { vaultId: vault.id, result: 'NEEDS_HUMAN', resolvedBy: null },
     data: { resolvedBy: 'CANCELLED_POLICY_CHANGED' },
   });
+  await prisma.proposal.updateMany({ where: { vaultId: vault.id, status: 'OPEN' }, data: { status: 'CANCELLED', resolvedAt: new Date() } });
 
   let refundError: string | undefined;
   if (saved.refund) {
@@ -175,6 +205,7 @@ vaultsRouter.post('/:id/policy', async (req, res) => {
   await startWatching(vault.id); // shopping vaults: the agent looks again, with the new rules
   emit('vault:updated', { vaultId: vault.id });
   emit('ledger:updated', { vaultId: vault.id });
+  emit('policy:changed', { vaultId: vault.id, version: saved.policy.version, changeCents, cancelledApprovals: cancelled.count, refundError });
   res.json({
     vault: await prisma.vault.findUniqueOrThrow({ where: { id: vault.id } }),
     version: saved.policy.version,
@@ -190,6 +221,11 @@ vaultsRouter.post('/:id/policy', async (req, res) => {
 vaultsRouter.post('/:id/fund/order', async (req, res) => {
   const { vault } = await loadVault(req.params.id);
   if (vault.status !== 'PENDING_FUNDING') throw new HttpError(409, 'VAULT_ALREADY_FUNDED');
+  if (vault.savingsPerPaymentCents !== null) {
+    throw new HttpError(409, 'SAVINGS_NEED_LINKED_PAYPAL', { message: 'Savings vaults are paid from a linked PayPal account (create them on the PayPal site).' });
+  }
+  const asked = await prisma.fundRequest.findFirst({ where: { vaultId: vault.id, status: 'OPEN' } });
+  if (asked) throw new HttpError(409, 'FRIEND_REQUEST_OPEN', { message: `${asked.payerEmail} was asked to fund this vault. Cancel that request first.` });
 
   const order = await createOrder({
     vaultId: vault.id,
@@ -203,12 +239,46 @@ vaultsRouter.post('/:id/fund/order', async (req, res) => {
   res.json(order);
 });
 
+// A client that credits the vault itself (the PayPal site pays from a saved PayPal account and writes
+// the FUND entry directly) reports it here, so live updates and alert emails still happen.
+vaultsRouter.post('/:id/fund/recorded', requireInternalKey, async (req, res) => {
+  const { orderId } = z.object({ orderId: z.string().min(1) }).parse(req.body);
+  const entry = await prisma.ledgerEntry.findUnique({ where: { paypalRef: orderId } });
+  if (!entry || entry.vaultId !== req.params.id || entry.type !== 'FUND') throw new HttpError(404, 'ORDER_NOT_FOUND');
+  emit('vault:updated', { vaultId: entry.vaultId });
+  emit('ledger:updated', { vaultId: entry.vaultId, entryId: entry.id });
+  res.json({ ok: true });
+});
+
 vaultsRouter.post('/:id/fund/capture', async (req, res) => {
   const { orderId } = z.object({ orderId: z.string() }).parse(req.body);
   const entry = await prisma.ledgerEntry.findUnique({ where: { paypalRef: orderId } });
   if (!entry || entry.vaultId !== req.params.id || entry.type !== 'FUND') throw new HttpError(404, 'ORDER_NOT_FOR_THIS_VAULT');
   const { vault } = await finishFunding(orderId);
   res.json(vault);
+});
+
+// ---------- Ask a friend (PayPal money request; the friend's payment goes straight into the vault) ----------
+
+vaultsRouter.post('/:id/fund/requests', async (req, res) => {
+  const body = z.object({ payerEmail: z.string().min(3).max(254), message: z.string().max(500).optional(), requesterName: z.string().max(100).optional() }).parse(req.body);
+  res.status(201).json(await createFundRequest(req.params.id, body));
+});
+
+// Asks PayPal whether the friend paid (webhooks and the background tick do this too).
+vaultsRouter.post('/:id/fund/requests/sync', async (req, res) => {
+  await syncFundRequests(req.params.id);
+  const [vault, fundRequests] = await Promise.all([
+    prisma.vault.findUniqueOrThrow({ where: { id: req.params.id } }),
+    prisma.fundRequest.findMany({ where: { vaultId: req.params.id }, orderBy: { createdAt: 'desc' }, take: 10 }),
+  ]);
+  res.json({ vault, fundRequests });
+});
+
+vaultsRouter.post('/:id/fund/requests/:requestId/cancel', async (req, res) => {
+  const request = await prisma.fundRequest.findUnique({ where: { id: req.params.requestId } });
+  if (!request || request.vaultId !== req.params.id) throw new HttpError(404, 'REQUEST_NOT_FOUND');
+  res.json(await cancelFundRequest(request, 'The vault owner cancelled this request.'));
 });
 
 // ---------- Subscribe (utility vault monthly top-up) ----------
@@ -240,36 +310,10 @@ vaultsRouter.post<{ id: string }>('/:id/spend', requireInternalKey, async (req, 
   const request = SpendRequestSchema.parse(req.body);
   const { vault, policy } = await loadVault(req.params.id);
   // The user changed the rules while this agent run was searching: it was looking for the old thing.
-  const verdict = runUsesOldPolicy(vault.id, vault.policies[0]?.version ?? 0)
-    ? { result: 'BLOCK' as const, reasons: ['POLICY_CHANGED'] }
-    : evaluate(vault, policy, request, await buildEngineContext(vault, request));
-
-  let decision = await prisma.decision.create({
-    data: { vaultId: vault.id, requestJson: request, result: verdict.result, reasons: verdict.reasons },
-  });
-  emit('decision:created', { vaultId: vault.id, decisionId: decision.id, result: decision.result });
-
-  if (decision.result !== 'APPROVE') return res.status(decision.result === 'BLOCK' ? 403 : 202).json({ decision });
-
-  try {
-    const { ledgerEntry, payout } = await executeSpend(decision.id);
-    res.json({ decision, ledgerEntry, payout });
-  } catch (err) {
-    // Lost a race with another spend (e.g. balance just ran out): record it as a block.
-    if (err instanceof LedgerError) {
-      decision = await prisma.decision.update({ where: { id: decision.id }, data: { result: 'BLOCK', reasons: [err.code] } });
-      emit('decision:created', { vaultId: vault.id, decisionId: decision.id, result: decision.result });
-      return res.status(403).json({ decision });
-    }
-    // Failed before any money was held (e.g. database down): don't leave an APPROVE that never paid.
-    const held = await prisma.ledgerEntry.findUnique({ where: { decisionId: decision.id } }).catch(() => null);
-    if (!held) {
-      await prisma.decision
-        .update({ where: { id: decision.id }, data: { result: 'BLOCK', reasons: ['SYSTEM_ERROR'] } })
-        .catch(() => undefined);
-    }
-    throw err;
-  }
+  const stale = runUsesOldPolicy(vault.id, vault.policies[0]?.version ?? 0);
+  const result = await decideAndSpend(vault, policy, request, stale ? { verdict: { result: 'BLOCK', reasons: ['POLICY_CHANGED'] } } : {});
+  const status = { APPROVE: 200, BLOCK: 403, NEEDS_HUMAN: 202 }[result.decision.result];
+  res.status(status).json(result);
 });
 
 // ---------- Run the vault's AI agent (Step 8) ----------
@@ -280,6 +324,7 @@ vaultsRouter.post<{ id: string }>('/:id/spend', requireInternalKey, async (req, 
 vaultsRouter.post('/:id/agent', async (req, res) => {
   const { task } = z.object({ task: z.string().max(500).optional() }).parse(req.body ?? {});
   const { vault } = await loadVault(req.params.id);
+  if (vault.type === 'SAVINGS') throw new HttpError(409, 'NO_AGENT', { message: 'A savings vault has no agent: it only saves.' });
   if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE');
   res.json(await runAgentForVault(vault.id, task));
 });
@@ -310,6 +355,7 @@ vaultsRouter.post('/:id/decisions/:decisionId/approve', async (req, res) => {
   if (claimed.count === 0) throw new HttpError(409, 'DECISION_NOT_PENDING');
   emit('decision:created', { vaultId: decision.vaultId, decisionId: decision.id, result: 'APPROVED_BY_HUMAN' });
   const result = await executeSpend(decision.id);
+  await continueShoppingList(decision.vaultId); // shopping lists: on to the next item
   res.json(result);
 });
 
@@ -324,6 +370,98 @@ vaultsRouter.post('/:id/decisions/:decisionId/reject', async (req, res) => {
   res.json(updated);
 });
 
+// ---------- Ask me: the agent's top options, the owner picks one ----------
+
+// The shopping agent (Ask me vaults) saves its top options here instead of buying. Newer options
+// replace older ones that are still open (for the same list item).
+vaultsRouter.post<{ id: string }>('/:id/proposals', requireInternalKey, async (req, res) => {
+  const body = CreateProposalSchema.parse(req.body);
+  const { vault } = await loadVault(req.params.id);
+  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE');
+  await prisma.proposal.updateMany({
+    where: { vaultId: vault.id, status: 'OPEN', itemId: body.item_id ?? null },
+    data: { status: 'CANCELLED', resolvedAt: new Date() },
+  });
+  const proposal = await prisma.proposal.create({
+    data: { vaultId: vault.id, itemId: body.item_id, summary: body.summary, options: body.options },
+  });
+  emit('proposal:created', { vaultId: vault.id, proposalId: proposal.id });
+  emit('vault:updated', { vaultId: vault.id });
+  res.status(201).json(proposal);
+});
+
+// The owner picked option `index`. It goes through the Policy Engine like any purchase: the pick
+// stands in for the control setting, every other rule still applies. A blocked pick reopens the
+// options so another one can be picked.
+vaultsRouter.post('/:id/proposals/:proposalId/choose', async (req, res) => {
+  const { index } = z.object({ index: z.number().int().min(0).max(2) }).parse(req.body);
+  const { vault, policy } = await loadVault(req.params.id);
+  const proposal = await prisma.proposal.findUnique({ where: { id: req.params.proposalId } });
+  if (!proposal || proposal.vaultId !== vault.id || proposal.status !== 'OPEN') throw new HttpError(409, 'PROPOSAL_NOT_OPEN');
+  const option = ProposalOptionSchema.array().parse(proposal.options)[index];
+  if (!option) throw new HttpError(400, 'NO_SUCH_OPTION');
+
+  // Only one pick wins if the button is clicked twice.
+  const claimed = await prisma.proposal.updateMany({
+    where: { id: proposal.id, status: 'OPEN' },
+    data: { status: 'CHOSEN', chosenIndex: index, resolvedAt: new Date() },
+  });
+  if (claimed.count === 0) throw new HttpError(409, 'PROPOSAL_NOT_OPEN');
+  const reopen = () =>
+    prisma.proposal.update({ where: { id: proposal.id }, data: { status: 'OPEN', chosenIndex: null, resolvedAt: null } });
+
+  const request: SpendRequest = {
+    merchant: option.merchant,
+    amount: option.verified_price ?? option.price,
+    category: option.category,
+    reason: option.title,
+    product_url: option.url,
+    verified_price: option.verified_price ?? undefined,
+    ...(proposal.itemId ? { item_id: proposal.itemId } : {}),
+  };
+  const result = await decideAndSpend(vault, policy, request, { ownerChose: true }).catch(async (err) => {
+    await reopen().catch(() => undefined);
+    throw err;
+  });
+  const updated = result.decision.result === 'BLOCK'
+    ? await reopen()
+    : await prisma.proposal.update({ where: { id: proposal.id }, data: { decisionId: result.decision.id } });
+  if (result.decision.result === 'APPROVE') await continueShoppingList(vault.id); // on to the next item
+  emit('vault:updated', { vaultId: vault.id });
+  const status = { APPROVE: 200, BLOCK: 403, NEEDS_HUMAN: 202 }[result.decision.result];
+  res.status(status).json({ proposal: updated, ...result });
+});
+
+// None of the options are right: the agent looks again (skipping these products).
+vaultsRouter.post('/:id/proposals/:proposalId/reject', async (req, res) => {
+  const claimed = await prisma.proposal.updateMany({
+    where: { id: req.params.proposalId, vaultId: req.params.id, status: 'OPEN' },
+    data: { status: 'REJECTED', resolvedAt: new Date() },
+  });
+  if (claimed.count === 0) throw new HttpError(409, 'PROPOSAL_NOT_OPEN');
+  await startWatching(req.params.id);
+  emit('vault:updated', { vaultId: req.params.id });
+  res.json({ ok: true });
+});
+
+// ---------- Paying in over time (savings) ----------
+
+// Takes the next payment from the owner's saved PayPal account now: the first one (the site calls
+// this right after creating the vault) or an early one ("pay now"). Scheduled ones run in the tick.
+vaultsRouter.post<{ id: string }>('/:id/savings/charge', requireInternalKey, async (req, res) => {
+  res.json(await chargeSavingsPayment(req.params.id));
+});
+
+vaultsRouter.post('/:id/savings/pause', async (req, res) => {
+  await pauseSavings(req.params.id);
+  res.json({ ok: true });
+});
+
+vaultsRouter.post('/:id/savings/resume', async (req, res) => {
+  await resumeSavings(req.params.id);
+  res.json({ ok: true });
+});
+
 // ---------- Liquidate + sync ----------
 
 vaultsRouter.post('/:id/liquidate', async (req, res) => {
@@ -336,5 +474,6 @@ vaultsRouter.post('/:id/liquidate', async (req, res) => {
 });
 
 vaultsRouter.post('/:id/sync', async (req, res) => {
+  await syncPendingCheckouts(req.params.id);
   res.json(await syncPendingPayouts(req.params.id));
 });

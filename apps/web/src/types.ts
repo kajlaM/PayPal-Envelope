@@ -1,7 +1,7 @@
 // Shapes returned by the KubePay API (apps/api). Amounts in the database are cents; policies use dollars.
 
-export type VaultType = 'SHOPPING' | 'UTILITY';
-export type VaultStatus = 'PENDING_FUNDING' | 'ACTIVE' | 'EXPIRED' | 'LIQUIDATED';
+export type VaultType = 'SHOPPING' | 'UTILITY' | 'SAVINGS';
+export type VaultStatus = 'PENDING_FUNDING' | 'SAVING' | 'ACTIVE' | 'EXPIRED' | 'LIQUIDATED';
 
 export type Policy = {
   vault_name: string;
@@ -16,9 +16,17 @@ export type Policy = {
     max_transactions_per_day?: number;
     human_approval_above?: number;
     on_policy_violation: 'BLOCK' | 'BLOCK_AND_ALERT';
+    control_mode?: 'ASK_ME' | 'ASK_ABOVE' | 'AUTOPILOT';
   };
   liquidation: { auto_refund: boolean };
-  shopping?: { product_query: string; required_keywords: string[]; check_every_minutes: number; [key: string]: unknown };
+  savings?: { amount_per_payment: number; every: 'DAY' | 'WEEK' | 'MONTH' };
+  shopping?: {
+    product_query: string;
+    required_keywords: string[];
+    check_every_minutes: number;
+    list?: { items: { id: string; name: string; max_price: number }[]; rebalance?: 'LEFTOVER' | 'NONE' };
+    [key: string]: unknown;
+  };
 };
 
 export type Vault = {
@@ -36,6 +44,32 @@ export type Vault = {
   createdAt: string;
   updatedAt: string;
   policy?: Policy;
+  openProposals?: number; // Ask me: option sets waiting for the owner to pick one
+  savingsPerPaymentCents?: number | null;
+  savingsEvery?: 'DAY' | 'WEEK' | 'MONTH' | null;
+  nextChargeAt?: string | null;
+  savingsPausedAt?: string | null;
+};
+
+export type ProposalOption = {
+  title: string;
+  merchant: string;
+  price: number;
+  verified_price: number | null;
+  url: string;
+  pros: string[];
+  cons: string[];
+};
+
+/** Ask me vaults: the agent's top options for the owner to pick from. */
+export type Proposal = {
+  id: string;
+  vaultId: string;
+  itemId: string | null;
+  options: ProposalOption[];
+  summary: string | null;
+  status: 'OPEN' | 'CHOSEN' | 'REJECTED' | 'CANCELLED';
+  createdAt: string;
 };
 
 export type SpendRequest = {
@@ -54,7 +88,7 @@ export type Decision = {
   requestJson: SpendRequest;
   result: 'APPROVE' | 'BLOCK' | 'NEEDS_HUMAN';
   reasons: string[];
-  resolvedBy: 'APPROVED_BY_HUMAN' | 'REJECTED_BY_HUMAN' | 'CANCELLED_POLICY_CHANGED' | null;
+  resolvedBy: 'APPROVED_BY_HUMAN' | 'REJECTED_BY_HUMAN' | 'CANCELLED_POLICY_CHANGED' | 'CHOSEN_BY_OWNER' | null;
   createdAt: string;
 };
 

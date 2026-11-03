@@ -22,6 +22,14 @@ export const REASON_TEXT: Record<string, string> = {
   UNUSUAL_SPEND: 'the purchase looks unusual compared with past spending in this vault',
   SYSTEM_ERROR: 'a system error stopped the payment before any money moved',
   REJECTED_BY_HUMAN: 'the vault owner rejected it',
+  POLICY_CHANGED: 'the vault rules changed while the agent was searching',
+  OWNER_APPROVAL_REQUIRED: 'the vault is set to "Ask me", so the owner decides every purchase',
+  ITEM_REQUIRED: 'a shopping-list purchase must say which item it buys',
+  UNKNOWN_ITEM: 'the item is not on the shopping list',
+  ITEM_ALREADY_BOUGHT: 'this shopping-list item was already bought',
+  ITEM_LIMIT_EXCEEDED: "the price is above this shopping-list item's limit",
+  STILL_SAVING: 'the vault is still being paid into and does not hold its full amount yet',
+  SAVINGS_VAULT: 'a savings vault only saves and never spends',
 };
 
 const usd = (dollars: number) => `$${dollars.toFixed(2)}`;

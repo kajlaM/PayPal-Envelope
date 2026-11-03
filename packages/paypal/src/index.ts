@@ -3,6 +3,8 @@ export { PayPalApiError, getAccessToken } from './http.ts';
 export { centsToValue, valueToCents } from './money.ts';
 export * from './orders.ts';
 export * from './payouts.ts';
+export * from './checkout.ts';
 export * from './subscriptions.ts';
 export * from './invoicing.ts';
+export * from './requests.ts';
 export * from './webhooks.ts';

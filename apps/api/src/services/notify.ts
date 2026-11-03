@@ -1,35 +1,88 @@
 import { prisma } from '@kubepay/db';
-import { describeDecision, describeLedger } from '@kubepay/audit';
-import { SpendRequestSchema } from '@kubepay/policy';
-import { onEvent } from '../events.ts';
+import {
+  controlMode, PolicySchema, ProposalOptionSchema, savingsSchedule, signApprovalLink, SpendRequestSchema, type ApprovalAction, type Policy,
+} from '@kubepay/policy';
+import { onEvent, type KubePayEvent } from '../events.ts';
+import { buildEmail, shortId, usd, type Email, type EmailAction, type EmailInput, type EmailKind, type Purchase, type VaultFacts } from './emails.ts';
 
-// Zapier alerts (Step 12). Blocked payments, payments waiting for a human, refunds of unused money,
-// and failed payouts are POSTed to a "Webhooks by Zapier: Catch Hook" URL, which forwards them to
-// Slack / Gmail. Sent in the background: a Zapier outage never slows or breaks a payment.
-
-export type AlertEvent = 'BLOCK' | 'NEEDS_HUMAN' | 'LIQUIDATED' | 'PAYOUT_FAILED';
+// Alert emails (Step 12). Every important moment of a vault (live, purchase, approval needed, blocked,
+// rules changed, refund, ending soon, closed, payment failed) becomes a personal email written here
+// (emails.ts) and POSTed to a "Webhooks by Zapier: Catch Hook" URL; the Zap only delivers it
+// (Gmail: To / CC / Subject / Body from the email_* fields). Sent in the background: a Zapier
+// outage never slows or breaks a payment.
+//
+// Recipients (.env): the vault owner gets the mail (ALERT_RECIPIENTS maps their PayPal sandbox email to
+// a real inbox), and every address in ALERT_CC gets a copy.
 
 export type Alert = {
-  event: AlertEvent;
-  vault: { id: string; name: string; type: string; status: string };
+  event: EmailKind;
+  vault: { id: string; name: string; type: string; status: string; short_id: string };
   amount: number; // dollars
   merchant: string | null;
   reasons: string[];
-  message: string;
+  message: string; // plain-text body (kept for Zaps made before the email_* fields)
   dashboard_link: string;
   timestamp: string;
+  email_to: string;
+  email_cc: string; // comma separated
+  email_subject: string;
+  email_text: string;
+  email_html: string;
 };
 
 const hookUrl = () => process.env.ZAPIER_HOOK_URL?.trim() || undefined;
-const dashboardLink = (vaultId: string) =>
-  `${(process.env.DASHBOARD_URL?.trim() || 'http://localhost:5173').replace(/\/$/, '')}/?vault=${vaultId}`;
+const list = (value?: string) => (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
-// The same ledger change can be emitted twice (webhook + sync); alert once per entry and status.
+const siteBase = () => (process.env.SITE_URL?.trim() || `http://localhost:${process.env.INTERFACE_PORT ?? 3000}`).replace(/\/$/, '');
+
+export const siteLink = (vaultId: string) => `${siteBase()}/?vault=${vaultId}`;
+
+/**
+ * Answer-from-email link (two-way alerts): opens a confirm page on the wallet site, which checks the
+ * signature (INTERNAL_API_KEY, shared by the API and the site). Without the key: no buttons.
+ */
+function actionLink(action: ApprovalAction, label: string, style: EmailAction['style']): EmailAction | null {
+  const secret = process.env.INTERNAL_API_KEY?.trim();
+  if (!secret) return null;
+  return { label, url: `${siteBase()}/email/act?t=${encodeURIComponent(signApprovalLink(action, secret))}`, style };
+}
+const present = <T,>(list: (T | null)[]) => list.filter((x): x is T => x !== null);
+
+/** The vault owner's real inbox (To) and everyone else in ALERT_CC (CC). */
+export function recipients(ownerPaypalEmail: string) {
+  const map = Object.fromEntries(
+    list(process.env.ALERT_RECIPIENTS).map((pair) => pair.split('=').map((s) => s.trim().toLowerCase()) as [string, string]),
+  );
+  const cc = list(process.env.ALERT_CC);
+  const to = map[ownerPaypalEmail.toLowerCase()] ?? cc[0] ?? '';
+  return { to, cc: cc.filter((a) => a.toLowerCase() !== to.toLowerCase()) };
+}
+
+// The same event can arrive twice (webhook + sync); mail once per entry and status.
 const sent = new Set<string>();
+const once = (key: string) => (sent.has(key) ? false : (sent.add(key), true));
 
-export async function sendAlert(alert: Alert) {
+async function send(input: EmailInput, extra: { ownerEmail: string; status: string; amountCents?: number; merchant?: string | null; reasons?: string[] }) {
   const url = hookUrl();
   if (!url) return;
+  const email: Email = buildEmail(input);
+  const { to, cc } = recipients(extra.ownerEmail);
+  const v = input.vault;
+  const alert: Alert = {
+    event: input.kind,
+    vault: { id: v.id, name: v.name, type: v.type, status: extra.status, short_id: shortId(v.id) },
+    amount: (extra.amountCents ?? 0) / 100,
+    merchant: extra.merchant ?? null,
+    reasons: extra.reasons ?? [],
+    message: email.text,
+    dashboard_link: v.link,
+    timestamp: new Date().toISOString(),
+    email_to: to,
+    email_cc: cc.join(', '),
+    email_subject: email.subject,
+    email_text: email.text,
+    email_html: email.html,
+  };
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -39,68 +92,235 @@ export async function sendAlert(alert: Alert) {
   if (!res.ok) throw new Error(`Zapier answered ${res.status}`);
 }
 
-export async function alertForDecision(decisionId: string) {
-  const d = await prisma.decision.findUniqueOrThrow({ where: { id: decisionId }, include: { vault: true } });
-  // Only the engine's own BLOCK / NEEDS_HUMAN; a human approving or rejecting needs no alert.
-  if (d.result === 'APPROVE' || d.resolvedBy) return;
-  const request = SpendRequestSchema.safeParse(d.requestJson);
-  if (!request.success) return;
-  const key = `decision:${d.id}:${d.result}`;
-  if (sent.has(key)) return;
-  sent.add(key);
-  await sendAlert({
-    event: d.result,
-    vault: { id: d.vault.id, name: d.vault.name, type: d.vault.type, status: d.vault.status },
-    amount: request.data.amount,
-    merchant: request.data.merchant,
-    reasons: d.reasons,
-    message: describeDecision({
-      id: d.id, vaultId: d.vaultId, vaultName: d.vault.name, vaultType: d.vault.type, result: d.result,
-      reasons: d.reasons, resolvedBy: null, request: request.data, createdAt: d.createdAt,
-    }),
-    dashboard_link: dashboardLink(d.vaultId),
-    timestamp: d.createdAt.toISOString(),
+// ---------- Facts about a vault ----------
+
+async function loadVault(vaultId: string) {
+  const vault = await prisma.vault.findUniqueOrThrow({
+    where: { id: vaultId },
+    include: { user: true, policies: { orderBy: { version: 'desc' } } },
   });
+  const policy = PolicySchema.safeParse(vault.policies[0]?.policyJson);
+  return { vault, policy: policy.success ? policy.data : undefined };
+}
+
+function facts(vault: Awaited<ReturnType<typeof loadVault>>['vault'], policy: Policy | undefined): VaultFacts {
+  return {
+    id: vault.id,
+    name: vault.name,
+    type: vault.type,
+    ownerName: vault.user.name,
+    budgetCents: vault.budgetCents,
+    balanceCents: vault.balanceCents,
+    expiresAt: vault.expiresAt,
+    lookingFor: policy?.shopping?.product_query,
+    maxPerPaymentCents: policy ? Math.round(policy.rules.max_single_transaction * 100) : undefined,
+    shops: policy?.rules.approved_merchants,
+    link: siteLink(vault.id),
+  };
+}
+
+function purchaseFrom(requestJson: unknown, fallbackMerchant: string, amountCents: number): Purchase {
+  const r = SpendRequestSchema.safeParse(requestJson);
+  return {
+    item: (r.success && (r.data.reason || r.data.invoice_id)) || 'a purchase',
+    merchant: r.success ? r.data.merchant : fallbackMerchant,
+    amountCents: r.success ? Math.round(r.data.amount * 100) : amountCents,
+    productUrl: r.success ? r.data.product_url : undefined,
+  };
+}
+
+// ---------- One function per kind of event ----------
+
+export async function alertForDecision(decisionId: string) {
+  const d = await prisma.decision.findUniqueOrThrow({ where: { id: decisionId } });
+  // Only the engine's own BLOCK / NEEDS_HUMAN; a human approving or rejecting needs no mail. A run
+  // that started under old rules being stopped (POLICY_CHANGED) is expected, not news.
+  if (d.result === 'APPROVE' || d.resolvedBy || d.reasons.includes('POLICY_CHANGED')) return;
+  if (!once(`decision:${d.id}:${d.result}`)) return;
+  const { vault, policy } = await loadVault(d.vaultId);
+  const purchase = purchaseFrom(d.requestJson, '?', 0);
+  const actions = d.result === 'NEEDS_HUMAN'
+    ? present([
+        actionLink({ a: 'approve', v: vault.id, d: d.id }, `Approve ${usd(purchase.amountCents)}`, 'primary'),
+        actionLink({ a: 'reject', v: vault.id, d: d.id }, 'Reject', 'secondary'),
+      ])
+    : undefined;
+  await send(
+    { kind: d.result, vault: facts(vault, policy), purchase, reasons: d.reasons, actions },
+    { ownerEmail: vault.user.paypalEmail, status: vault.status, amountCents: purchase.amountCents, merchant: purchase.merchant, reasons: d.reasons },
+  );
+}
+
+export async function alertForProposal(proposalId: string) {
+  const p = await prisma.proposal.findUniqueOrThrow({ where: { id: proposalId } });
+  if (p.status !== 'OPEN' || !once(`proposal:${p.id}`)) return;
+  const { vault, policy } = await loadVault(p.vaultId);
+  const options = ProposalOptionSchema.array().parse(p.options).map((o) => ({
+    item: o.title, merchant: o.merchant, amountCents: Math.round((o.verified_price ?? o.price) * 100), productUrl: o.url,
+  }));
+  const actions = present([
+    ...options.map((o, i) => actionLink({ a: 'pick', v: vault.id, p: p.id, i }, `Pick ${i + 1}: ${usd(o.amountCents)} at ${o.merchant}`, 'primary')),
+    actionLink({ a: 'none', v: vault.id, p: p.id }, 'None of these', 'secondary'),
+  ]);
+  await send(
+    { kind: 'OPTIONS_READY', vault: facts(vault, policy), options, summary: p.summary ?? undefined, actions },
+    { ownerEmail: vault.user.paypalEmail, status: vault.status, amountCents: options[0]?.amountCents },
+  );
+}
+
+export async function alertForSavingsFailure(payload: { vaultId: string; reason: string; failures: number; paused: boolean }) {
+  if (!once(`savings-failed:${payload.vaultId}:${payload.failures}`)) return;
+  const { vault, policy } = await loadVault(payload.vaultId);
+  await send(
+    { kind: 'SAVINGS_PAYMENT_FAILED', vault: facts(vault, policy), reason: payload.reason, failures: payload.failures, paused: payload.paused },
+    { ownerEmail: vault.user.paypalEmail, status: vault.status, amountCents: vault.savingsPerPaymentCents ?? 0, reasons: [payload.reason] },
+  );
 }
 
 export async function alertForLedgerEntry(entryId: string) {
-  const e = await prisma.ledgerEntry.findUniqueOrThrow({ where: { id: entryId }, include: { vault: true, merchant: true } });
-  const event: AlertEvent | null =
-    e.type === 'LIQUIDATE' && e.status === 'COMPLETED' ? 'LIQUIDATED'
-      : e.type !== 'FUND' && e.status === 'FAILED' ? 'PAYOUT_FAILED'
-        : null;
-  if (!event) return;
-  const key = `ledger:${e.id}:${e.status}`;
-  if (sent.has(key)) return;
-  sent.add(key);
-  await sendAlert({
-    event,
-    vault: { id: e.vault.id, name: e.vault.name, type: e.vault.type, status: e.vault.status },
-    amount: e.amountCents / 100,
-    merchant: e.merchant?.name ?? null,
-    reasons: e.note ? [e.note] : [],
-    message: describeLedger({
-      id: e.id, vaultId: e.vaultId, vaultName: e.vault.name, vaultType: e.vault.type, type: e.type, status: e.status,
-      amountCents: e.amountCents, merchant: e.merchant?.name ?? null, note: e.note, decisionId: e.decisionId, updatedAt: e.updatedAt,
-    }),
-    dashboard_link: dashboardLink(e.vaultId),
-    timestamp: e.updatedAt.toISOString(),
-  });
+  const e = await prisma.ledgerEntry.findUniqueOrThrow({ where: { id: entryId }, include: { merchant: true, decision: true } });
+  if (!once(`ledger:${e.id}:${e.status}`)) return;
+  const { vault, policy } = await loadVault(e.vaultId);
+  const v = facts(vault, policy);
+  const base = { ownerEmail: vault.user.paypalEmail, status: vault.status, amountCents: e.amountCents, merchant: e.merchant?.name ?? null };
+
+  if (e.type === 'FUND' && e.status === 'COMPLETED' && vault.savingsPerPaymentCents !== null && vault.savingsEvery !== null) {
+    // Paid in over time: one mail per payment, and one when the goal is reached.
+    const paid = await prisma.ledgerEntry.findMany({ where: { vaultId: e.vaultId, type: 'FUND', status: 'COMPLETED' }, orderBy: { createdAt: 'asc' } });
+    const n = paid.findIndex((p) => p.id === e.id) + 1;
+    const { payments } = savingsSchedule(vault.budgetCents, { amount_per_payment: vault.savingsPerPaymentCents / 100, every: vault.savingsEvery }, vault.createdAt);
+    if (vault.status !== 'SAVING' && n === paid.length) {
+      await send({ kind: 'SAVINGS_GOAL_REACHED', vault: v, willShop: vault.type !== 'SAVINGS' }, base);
+    } else {
+      await send({ kind: 'SAVINGS_PAYMENT', vault: v, amountCents: e.amountCents, paymentNumber: n, paymentsTotal: Math.max(payments, n), nextAt: vault.nextChargeAt ?? undefined }, base);
+    }
+  } else if (e.type === 'FUND' && e.status === 'COMPLETED') {
+    // The first payment makes the vault live. Later ones (top-ups) are in the "rules updated" mail.
+    const first = await prisma.ledgerEntry.findFirst({ where: { vaultId: e.vaultId, type: 'FUND', status: 'COMPLETED' }, orderBy: { createdAt: 'asc' } });
+    if (first?.id === e.id) await send({ kind: 'VAULT_LIVE', vault: v }, base);
+  } else if (e.type === 'SPEND' && e.status === 'COMPLETED') {
+    await send({ kind: 'PURCHASED', vault: v, purchase: purchaseFrom(e.decision?.requestJson, e.merchant?.name ?? 'merchant', e.amountCents) }, base);
+  } else if (e.type === 'LIQUIDATE' && e.status === 'COMPLETED' && vault.status === 'LIQUIDATED') {
+    await send({ kind: 'LIQUIDATED', vault: v, ...(await closingSummary(vault.id)), refundCents: e.amountCents, ruleVersions: vault.policies.length, openedAt: vault.createdAt }, base);
+  } else if (e.type === 'LIQUIDATE' && e.status === 'COMPLETED') {
+    await send({ kind: 'REFUND_SENT', vault: v, amountCents: e.amountCents }, base); // after lowering the amount
+  } else if (e.status === 'FAILED' && e.type !== 'FUND') {
+    await send(
+      { kind: 'PAYOUT_FAILED', vault: v, amountCents: e.amountCents, to: e.merchant?.name ?? 'your PayPal', refund: e.type === 'LIQUIDATE', reason: e.note ?? undefined },
+      { ...base, reasons: e.note ? [e.note] : [] },
+    );
+  }
 }
 
-/** Starts sending alerts to Zapier for every matching decision / ledger event. */
+async function closingSummary(vaultId: string) {
+  const entries = await prisma.ledgerEntry.findMany({
+    where: { vaultId, status: 'COMPLETED' },
+    include: { merchant: true, decision: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  const sum = (type: string) => entries.filter((e) => e.type === type).reduce((n, e) => n + e.amountCents, 0);
+  return {
+    totals: { paidInCents: sum('FUND'), spentCents: sum('SPEND'), refundedCents: sum('LIQUIDATE') },
+    purchases: entries
+      .filter((e) => e.type === 'SPEND')
+      .map((e) => purchaseFrom(e.decision?.requestJson, e.merchant?.name ?? 'merchant', e.amountCents)),
+  };
+}
+
+function controlText(p: Policy) {
+  const mode = controlMode(p);
+  if (mode === 'ASK_ME') return 'Ask me (I pick from the top 3)';
+  if (mode === 'AUTOPILOT') return 'Autopilot (buys within the rules)';
+  const above = p.rules.human_approval_above;
+  return above === undefined ? 'Buys within the rules' : `Ask me above ${usd(Math.round(above * 100))}`;
+}
+
+/** The rules as [label, text], to show what changed between two versions. */
+function ruleRows(p: Policy): [string, string][] {
+  const r = p.rules;
+  return [
+    ['Vault name', p.vault_name],
+    ...(p.shopping ? [['AI looks for', p.shopping.product_query] as [string, string]] : []),
+    ['Amount', usd(Math.round(p.allocated_budget * 100))],
+    ['Max per payment', usd(Math.round(r.max_single_transaction * 100))],
+    ['Allowed shops', r.approved_merchants.join(', ')],
+    ['Categories', r.allowed_categories.join(', ')],
+    ['Ends', new Date(r.expiry_timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: process.env.ALERT_TIMEZONE?.trim() || 'Asia/Kolkata' })],
+    ['Control', controlText(p)],
+  ];
+}
+
+export function policyChanges(before: Policy | undefined, after: Policy | undefined) {
+  if (!before || !after) return [];
+  const old = Object.fromEntries(ruleRows(before));
+  return ruleRows(after)
+    .filter(([label, value]) => old[label] !== value)
+    .map(([label, value]) => ({ label, before: old[label] ?? '–', after: value }));
+}
+
+export async function alertForPolicyChange(payload: { vaultId: string; version: number; changeCents: number; cancelledApprovals: number; refundError?: string }) {
+  if (!once(`policy:${payload.vaultId}:${payload.version}`)) return;
+  const { vault, policy } = await loadVault(payload.vaultId);
+  const now = vault.policies.find((p) => p.version === payload.version);
+  const before = vault.policies.find((p) => p.version === payload.version - 1);
+  const parse = (json: unknown) => { const r = PolicySchema.safeParse(json); return r.success ? r.data : undefined; };
+  await send(
+    {
+      kind: 'POLICY_CHANGED',
+      vault: facts(vault, policy),
+      version: payload.version,
+      changes: policyChanges(parse(before?.policyJson), parse(now?.policyJson)),
+      changeCents: payload.changeCents,
+      cancelledApprovals: payload.cancelledApprovals,
+      refundFailed: payload.refundError,
+    },
+    { ownerEmail: vault.user.paypalEmail, status: vault.status, amountCents: Math.abs(payload.changeCents) },
+  );
+}
+
+// "Ends in 24 hours": mailed when a vault crosses the 24-hour mark between two checks, so a restart
+// never mails the same vault twice (a vault that crossed it while the API was down gets none).
+const DAY_MS = 24 * 60 * 60_000;
+let lastEndingCheck = new Date();
+
+export async function alertEndingSoon(now = new Date()) {
+  const from = lastEndingCheck;
+  lastEndingCheck = now;
+  const vaults = await prisma.vault.findMany({
+    where: { status: 'ACTIVE', expiresAt: { gt: new Date(from.getTime() + DAY_MS), lte: new Date(now.getTime() + DAY_MS) } },
+    include: { user: true, policies: { orderBy: { version: 'desc' }, take: 1 } },
+  });
+  for (const vault of vaults) {
+    if (vault.createdAt.getTime() > vault.expiresAt.getTime() - DAY_MS) continue; // lived less than a day
+    if (!once(`ending:${vault.id}:${vault.expiresAt.toISOString()}`)) continue;
+    const policy = PolicySchema.safeParse(vault.policies[0]?.policyJson);
+    await send(
+      { kind: 'ENDING_SOON', vault: facts(vault, policy.success ? policy.data : undefined) },
+      { ownerEmail: vault.user.paypalEmail, status: vault.status, amountCents: vault.balanceCents },
+    ).catch((err) => console.error(`Ending-soon mail for vault ${vault.id} failed:`, (err as Error).message));
+  }
+}
+
+/** Starts sending alert emails (through Zapier) for every matching event. */
 export function startNotifications() {
   if (!hookUrl()) {
-    console.log('Zapier alerts off (set ZAPIER_HOOK_URL to turn them on).');
+    console.log('Alert emails off (set ZAPIER_HOOK_URL to turn them on).');
     return;
   }
-  onEvent((event, payload) => {
+  if (!list(process.env.ALERT_CC).length && !list(process.env.ALERT_RECIPIENTS).length) {
+    console.log('Alert emails: no ALERT_RECIPIENTS / ALERT_CC in .env, so the Zap decides where mail goes.');
+  }
+  onEvent((event: KubePayEvent, payload) => {
     const job =
-      event === 'decision:created' && typeof payload.decisionId === 'string'
-        ? alertForDecision(payload.decisionId)
-        : event === 'ledger:updated' && typeof payload.entryId === 'string'
-          ? alertForLedgerEntry(payload.entryId)
-          : null;
-    job?.catch((err) => console.error(`Zapier alert failed (${event}):`, (err as Error).message));
+      event === 'decision:created' && typeof payload.decisionId === 'string' ? alertForDecision(payload.decisionId)
+        : event === 'ledger:updated' && typeof payload.entryId === 'string' ? alertForLedgerEntry(payload.entryId)
+          : event === 'policy:changed' ? alertForPolicyChange(payload as Parameters<typeof alertForPolicyChange>[0])
+            : event === 'proposal:created' && typeof payload.proposalId === 'string' ? alertForProposal(payload.proposalId)
+              : event === 'savings:failed' ? alertForSavingsFailure(payload as Parameters<typeof alertForSavingsFailure>[0])
+            : null;
+    job?.catch((err) => console.error(`Alert email failed (${event}):`, (err as Error).message));
   });
+  setInterval(() => {
+    alertEndingSoon().catch((err) => console.error('Ending-soon check failed:', (err as Error).message));
+  }, 60_000).unref();
 }

@@ -1,8 +1,9 @@
 import { prisma } from '@kubepay/db';
 import { runVaultAgent } from '@kubepay/agents';
-import { PolicySchema } from '@kubepay/policy';
+import { itemProgress, listItems, PolicySchema } from '@kubepay/policy';
 import { emit } from '../events.ts';
 import { HttpError } from '../http.ts';
+import { itemSpentCents } from './policy-context.ts';
 
 // Runs vault agents and keeps shopping vaults in "watch mode": if nothing could be bought,
 // the agent looks again every check_every_minutes until the vault expires.
@@ -74,6 +75,14 @@ export async function startWatching(vaultId: string) {
     where: { id: vaultId, type: 'SHOPPING', status: 'ACTIVE' },
     data: { nextAgentRunAt: new Date() },
   });
+}
+
+/** Shopping lists: after a purchase, the agent goes on to the items still to buy. Other vaults are done. */
+export async function continueShoppingList(vaultId: string) {
+  const vault = await prisma.vault.findUniqueOrThrow({ where: { id: vaultId }, include: { policies: { orderBy: { version: 'desc' }, take: 1 } } });
+  const policy = PolicySchema.safeParse(vault.policies[0]?.policyJson);
+  if (!policy.success || listItems(policy.data).length === 0) return;
+  if (itemProgress(policy.data, vault.balanceCents, await itemSpentCents(vaultId)).some((i) => !i.bought)) await startWatching(vaultId);
 }
 
 export async function stopWatching(vaultId: string) {

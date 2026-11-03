@@ -1,4 +1,4 @@
-import type { AgentRun, CompileResult, CopilotAnswer, Decision, LedgerEntry, Policy, Vault } from './types.ts';
+import type { AgentRun, CompileResult, CopilotAnswer, Decision, LedgerEntry, Policy, Proposal, Vault } from './types.ts';
 
 export const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
 
@@ -32,6 +32,7 @@ const v = (id: string) => `/api/vaults/${encodeURIComponent(id)}`;
 
 export const api = {
   vaults: () => request<Vault[]>('/api/vaults'),
+  vault: (id: string) => request<Vault & { proposals: Proposal[] }>(v(id)),
   decisions: () => request<Decision[]>('/api/decisions'),
   ledger: () => request<LedgerEntry[]>('/api/ledger'),
 
@@ -47,6 +48,9 @@ export const api = {
   stopAgent: (id: string) => request(`${v(id)}/agent/stop`, {}),
   approve: (vaultId: string, decisionId: string) => request(`${v(vaultId)}/decisions/${decisionId}/approve`, {}),
   reject: (vaultId: string, decisionId: string) => request(`${v(vaultId)}/decisions/${decisionId}/reject`, {}),
+  chooseOption: (vaultId: string, proposalId: string, index: number) =>
+    request<{ decision: Decision }>(`${v(vaultId)}/proposals/${proposalId}/choose`, { index }),
+  rejectOptions: (vaultId: string, proposalId: string) => request(`${v(vaultId)}/proposals/${proposalId}/reject`, {}),
   liquidate: (id: string) => request(`${v(id)}/liquidate`, {}),
   sync: (id: string) => request(`${v(id)}/sync`, {}),
 

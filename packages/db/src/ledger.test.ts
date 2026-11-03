@@ -209,3 +209,24 @@ test('after lowering the amount, closing the vault refunds the rest and closes i
   assert.equal(vault.balanceCents, 0);
   assert.ok((await reconcile(vaultId)).ok);
 });
+
+test('a vault paid over time stays SAVING until it holds its full amount, and cannot spend before', async () => {
+  const vault = await prisma.vault.create({
+    data: {
+      userId, name: `Ledger savings ${run}`, type: 'SHOPPING', budgetCents: 10000, expiresAt: new Date(Date.now() + 3_600_000),
+      savingsPerPaymentCents: 4000, savingsEvery: 'MONTH', nextChargeAt: new Date(),
+    },
+  });
+  const pay = async (n: number, cents: number) => {
+    await startFunding(vault.id, cents, `test-save-${vault.id}-${n}`);
+    return completeFunding(`test-save-${vault.id}-${n}`);
+  };
+  assert.equal((await pay(1, 4000)).status, 'SAVING');
+  await assert.rejects(spend(vault.id, 100), (e: unknown) => e instanceof LedgerError && e.code === 'VAULT_INACTIVE');
+  assert.equal((await pay(2, 4000)).status, 'SAVING');
+  const done = await pay(3, 2000);
+  assert.equal(done.status, 'ACTIVE');
+  assert.equal(done.balanceCents, 10000);
+  assert.equal(done.nextChargeAt, null); // no more payments
+  assert.ok((await reconcile(vault.id)).ok);
+});

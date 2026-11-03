@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, errorText } from '../api.ts';
 import { cents, label, time, usd } from '../format.ts';
-import type { AgentStep, Vault } from '../types.ts';
+import type { AgentStep, Policy, Proposal, Vault } from '../types.ts';
 import { BalanceBar, Countdown, ErrorNote, Pill } from './common.tsx';
 import { FundButton } from './FundButton.tsx';
 
@@ -9,6 +9,13 @@ const short = (value: unknown) => {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return text && text.length > 180 ? `${text.slice(0, 180)}…` : text;
 };
+
+function controlText(rules: Policy['rules']) {
+  const mode = rules.control_mode ?? 'ASK_ABOVE';
+  if (mode === 'ASK_ME') return 'Ask me (owner picks from the top 3)';
+  if (mode === 'AUTOPILOT' || rules.human_approval_above === undefined) return 'Autopilot';
+  return `Ask above ${usd(rules.human_approval_above)}`;
+}
 
 /** The selected vault: its rules, the PayPal fund button, agent controls, and the agent's live tool calls. */
 export function VaultPanel({ vault, steps, onChanged }: { vault: Vault; steps: AgentStep[]; onChanged: () => void }) {
@@ -18,6 +25,17 @@ export function VaultPanel({ vault, steps, onChanged }: { vault: Vault; steps: A
   const [result, setResult] = useState<string | null>(null);
   const p = vault.policy;
   const mySteps = steps.filter((s) => s.vaultId === vault.id).slice(-25).reverse();
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+
+  // Ask me: load the open options when there are any (the vault list only has the count).
+  useEffect(() => {
+    if (!vault.openProposals || vault.status !== 'ACTIVE') return setProposals([]);
+    let live = true;
+    api.vault(vault.id).then((v) => live && setProposals(v.proposals.filter((p) => p.status === 'OPEN'))).catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [vault.id, vault.openProposals, vault.status, vault.updatedAt]);
 
   async function run(name: string, fn: () => Promise<unknown>, done?: (r: any) => string | null) {
     setBusy(name);
@@ -63,10 +81,17 @@ export function VaultPanel({ vault, steps, onChanged }: { vault: Vault; steps: A
               <dt>Max per payment</dt>
               <dd>{usd(p.rules.max_single_transaction)}</dd>
             </div>
-            {p.rules.human_approval_above !== undefined && (
+            <div>
+              <dt>Control</dt>
+              <dd>{controlText(p.rules)}</dd>
+            </div>
+            {p.savings && (
               <div>
-                <dt>Needs you above</dt>
-                <dd>{usd(p.rules.human_approval_above)}</dd>
+                <dt>Paid in over time</dt>
+                <dd>
+                  {usd(p.savings.amount_per_payment)} every {p.savings.every.toLowerCase()}
+                  {vault.status === 'SAVING' && (vault.savingsPausedAt ? ' · paused' : vault.nextChargeAt ? ` · next ${time(vault.nextChargeAt)}` : '')}
+                </dd>
               </div>
             )}
             <div>
@@ -79,15 +104,15 @@ export function VaultPanel({ vault, steps, onChanged }: { vault: Vault; steps: A
             </div>
             {p.shopping && (
               <div>
-                <dt>Looking for</dt>
-                <dd>{p.shopping.product_query}</dd>
+                <dt>{p.shopping.list ? 'Shopping list' : 'Looking for'}</dt>
+                <dd>{p.shopping.list ? p.shopping.list.items.map((i) => `${i.name} ≤ ${usd(i.max_price)}`).join(' · ') : p.shopping.product_query}</dd>
               </div>
             )}
           </>
         )}
       </dl>
 
-      {vault.status === 'PENDING_FUNDING' && (
+      {vault.status === 'PENDING_FUNDING' && !p?.savings && (
         <>
           <p className="muted small">Fund the vault with PayPal (sandbox) to activate it.</p>
           <FundButton vault={vault} onFunded={onChanged} />
@@ -145,6 +170,32 @@ export function VaultPanel({ vault, steps, onChanged }: { vault: Vault; steps: A
           </button>
         </div>
       )}
+
+      {proposals.map((prop) => (
+        <div key={prop.id} className="stack">
+          <h4>Pick one</h4>
+          {prop.summary && <p className="small">{prop.summary}</p>}
+          <ol className="steps">
+            {prop.options.map((o, i) => (
+              <li key={o.url}>
+                <a href={o.url} target="_blank" rel="noreferrer">{o.title}</a> · {usd(o.verified_price ?? o.price)} at {o.merchant}
+                <div className="small ok">{o.pros.map((t) => `+ ${t}`).join(' · ')}</div>
+                <div className="small bad">{o.cons.map((t) => `− ${t}`).join(' · ')}</div>
+                <button
+                  className="primary"
+                  disabled={busy !== null}
+                  onClick={() => run('choose', () => api.chooseOption(vault.id, prop.id, i), (r) => `Picked: ${r.decision.result}${r.decision.reasons.length ? ` (${r.decision.reasons.join(', ')})` : ''}`)}
+                >
+                  Pick this
+                </button>
+              </li>
+            ))}
+          </ol>
+          <button disabled={busy !== null} onClick={() => run('reject-options', () => api.rejectOptions(vault.id, prop.id), () => 'The agent will look for other options.')}>
+            None of these
+          </button>
+        </div>
+      ))}
 
       {result && <p className="ok small">{result}</p>}
       <ErrorNote message={error} />

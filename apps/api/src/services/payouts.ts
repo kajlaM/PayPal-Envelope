@@ -5,13 +5,17 @@ import { onPayoutFailed, onPayoutSucceeded } from './settle.ts';
 
 const FAILED: PayoutItemStatus[] = ['FAILED', 'RETURNED', 'BLOCKED', 'REFUNDED', 'REVERSED'];
 
+// Purchases paid with PayPal Checkout are settled by checkout.ts, never here (and never re-sent as
+// a payout). paidVia is empty on entries made before Checkout existed, so "not CHECKOUT" keeps them.
+const NOT_CHECKOUT = { OR: [{ paidVia: null }, { paidVia: { not: 'CHECKOUT' } }] };
+
 /**
  * Asks PayPal for the status of every PENDING payout and settles the ledger.
  * Webhooks (Step 9) do the same job; this is the fallback and works without a public URL.
  */
 export async function syncPendingPayouts(vaultId?: string) {
   const pending = await prisma.ledgerEntry.findMany({
-    where: { status: 'PENDING', type: { in: ['SPEND', 'LIQUIDATE'] }, paypalRef: { not: null }, ...(vaultId ? { vaultId } : {}) },
+    where: { status: 'PENDING', type: { in: ['SPEND', 'LIQUIDATE'] }, paypalRef: { not: null }, ...NOT_CHECKOUT, ...(vaultId ? { vaultId } : {}) },
   });
 
   const results: { entryId: string; status: string }[] = [];
@@ -34,7 +38,7 @@ export async function syncPendingPayouts(vaultId?: string) {
  */
 export async function resumeStuckPayouts(olderThanMs = 2 * 60_000) {
   const stuck = await prisma.ledgerEntry.findMany({
-    where: { status: 'PENDING', type: { in: ['SPEND', 'LIQUIDATE'] }, paypalRef: null, createdAt: { lt: new Date(Date.now() - olderThanMs) } },
+    where: { status: 'PENDING', type: { in: ['SPEND', 'LIQUIDATE'] }, paypalRef: null, ...NOT_CHECKOUT, createdAt: { lt: new Date(Date.now() - olderThanMs) } },
     include: { merchant: true, vault: { include: { user: true } } },
   });
   for (const entry of stuck) {

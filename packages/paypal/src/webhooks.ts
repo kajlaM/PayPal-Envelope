@@ -25,6 +25,8 @@ export const WEBHOOK_EVENTS: Record<WebhookApp, readonly string[]> = {
     'BILLING.SUBSCRIPTION.ACTIVATED',
     'BILLING.SUBSCRIPTION.CANCELLED',
     'PAYMENT.SALE.COMPLETED',
+    'INVOICING.INVOICE.PAID', // "Ask a friend": the friend paid the money request
+    'INVOICING.INVOICE.CANCELLED',
   ],
   utility: ['INVOICING.INVOICE.PAID', 'INVOICING.INVOICE.CANCELLED'],
 };

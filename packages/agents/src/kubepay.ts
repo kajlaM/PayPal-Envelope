@@ -1,4 +1,4 @@
-import type { SpendRequest } from '@kubepay/policy';
+import type { ProposalOption, SpendRequest } from '@kubepay/policy';
 import { apiUrl, internalKey } from './config.ts';
 
 // The agents' only link to money: the KubePay API. They never call PayPal payouts directly.
@@ -16,10 +16,13 @@ async function call(method: string, path: string, body?: unknown, headers: Recor
 export type VaultView = {
   id: string;
   name: string;
-  type: 'SHOPPING' | 'UTILITY';
+  type: 'SHOPPING' | 'UTILITY' | 'SAVINGS';
   status: string;
   balanceCents: number;
   policy: any;
+  proposals?: { status: string; itemId: string | null; options: { url: string }[] }[];
+  /** Shopping-list vaults: each item's limit now, and whether it is bought or waits for the owner. */
+  items?: { id: string; name: string; limitCents: number; bought: boolean; waiting: 'OPTIONS' | 'APPROVAL' | null }[];
 };
 
 export async function getVault(vaultId: string): Promise<VaultView> {
@@ -40,6 +43,13 @@ export async function requestPurchase(vaultId: string, request: SpendRequest) {
     result: json.decision.result as 'APPROVE' | 'BLOCK' | 'NEEDS_HUMAN',
     reasons: json.decision.reasons as string[],
     decisionId: json.decision.id as string,
-    payoutStatus: json.payout?.batchStatus as string | undefined,
+    payoutStatus: (json.payout?.batchStatus ?? json.checkout?.captureStatus) as string | undefined,
   };
+}
+
+/** POST /api/vaults/:id/proposals. Ask me vaults: the owner picks one of these; nothing is bought here. */
+export async function proposeOptions(vaultId: string, body: { item_id?: string; summary?: string; options: ProposalOption[] }) {
+  const { status, json } = await call('POST', `/api/vaults/${vaultId}/proposals`, body, { 'x-internal-key': internalKey() });
+  if (status !== 201) throw new Error(`Proposal API failed (${status}): ${JSON.stringify(json)}`);
+  return json as { id: string };
 }

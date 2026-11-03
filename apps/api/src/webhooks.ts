@@ -3,7 +3,9 @@ import { addFunding, failFunding, prisma } from '@kubepay/db';
 import { getSubscription, valueToCents, verifyWebhook, type WebhookApp } from '@kubepay/paypal';
 import { emit } from './events.ts';
 import { HttpError } from './http.ts';
+import { settleCapture } from './services/checkout.ts';
 import { finishFunding } from './services/funding.ts';
+import { onMoneyRequestEvent } from './services/fund-requests.ts';
 import { syncPendingPayouts } from './services/payouts.ts';
 import { onPayoutFailed, onPayoutSucceeded } from './services/settle.ts';
 
@@ -52,6 +54,15 @@ export async function processEvent(event: PayPalEvent) {
 async function handleEvent(event: PayPalEvent): Promise<{ action: string; vaultId?: string }> {
   const r = event.resource ?? {};
   const type = event.event_type;
+
+  // ---- Vault purchases paid with PayPal Checkout (capture custom_id = SPEND ledger entry id) ----
+  if (type === 'PAYMENT.CAPTURE.COMPLETED' || type === 'PAYMENT.CAPTURE.DENIED') {
+    const spend = await checkoutSpend(r.custom_id);
+    if (spend) {
+      await settleCapture(spend.id, type === 'PAYMENT.CAPTURE.COMPLETED' ? 'COMPLETED' : 'DECLINED');
+      return { action: type === 'PAYMENT.CAPTURE.COMPLETED' ? 'purchase settled' : 'purchase declined, money back in vault', vaultId: spend.vaultId };
+    }
+  }
 
   // ---- Funding (Orders API) ----
   if (type === 'CHECKOUT.ORDER.APPROVED' || type === 'PAYMENT.CAPTURE.COMPLETED') {
@@ -115,9 +126,11 @@ async function handleEvent(event: PayPalEvent): Promise<{ action: string; vaultI
     return { action: 'subscription top-up added', vaultId };
   }
 
-  // ---- Invoices (city-utility app) ----
+  // ---- Invoices: "Ask a friend" money requests (platform app) and utility bills (city-utility app) ----
   if (type === 'INVOICING.INVOICE.PAID' || type === 'INVOICING.INVOICE.CANCELLED') {
     const invoiceId: string | undefined = r.invoice?.id ?? r.id;
+    const asked = invoiceId ? await onMoneyRequestEvent(invoiceId) : null;
+    if (asked) return { action: `money request ${asked.status.toLowerCase()}`, vaultId: asked.vaultId };
     const spend = invoiceId
       ? await prisma.ledgerEntry.findFirst({
           where: { type: 'SPEND', decision: { requestJson: { path: ['invoice_id'], equals: invoiceId } } },
@@ -136,6 +149,12 @@ async function isOurFundingOrder(orderId: string | undefined) {
   if (!orderId) return false;
   const entry = await prisma.ledgerEntry.findUnique({ where: { paypalRef: orderId } });
   return entry?.type === 'FUND';
+}
+
+async function checkoutSpend(entryId: string | undefined) {
+  if (!entryId) return null;
+  const entry = await prisma.ledgerEntry.findUnique({ where: { id: entryId } });
+  return entry?.type === 'SPEND' && entry.paidVia === 'CHECKOUT' ? entry : null;
 }
 
 async function outflowEntry(entryId: string | undefined) {

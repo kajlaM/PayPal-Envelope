@@ -1,5 +1,5 @@
 import { prisma } from './client.ts';
-import type { LedgerEntry, Prisma, Vault } from './generated/prisma/client.ts';
+import type { LedgerEntry, Prisma, Vault, VaultStatus } from './generated/prisma/client.ts';
 
 // Every change to a vault balance goes through this file.
 // Each function runs in one DB transaction and locks the vault row first,
@@ -32,6 +32,17 @@ function assertAmount(amountCents: number) {
   if (!Number.isInteger(amountCents) || amountCents <= 0) throw new LedgerError('INVALID_AMOUNT');
 }
 
+/**
+ * The vault after money came in. A vault paid into over time (savings) is SAVING until it holds its
+ * full amount, then ACTIVE (and stops charging); any other vault becomes ACTIVE on its first payment.
+ */
+function afterFunding(vault: Vault, balanceCents: number): { status: VaultStatus; nextChargeAt?: null } {
+  if (vault.savingsPerPaymentCents !== null && (vault.status === 'PENDING_FUNDING' || vault.status === 'SAVING')) {
+    return balanceCents >= vault.budgetCents ? { status: 'ACTIVE', nextChargeAt: null } : { status: 'SAVING' };
+  }
+  return { status: vault.status === 'PENDING_FUNDING' ? 'ACTIVE' : vault.status };
+}
+
 /** User clicked the PayPal button: record the order before it is captured. */
 export async function startFunding(vaultId: string, amountCents: number, paypalOrderId: string) {
   assertAmount(amountCents);
@@ -52,10 +63,7 @@ export async function completeFunding(paypalOrderId: string) {
     if (updated.count === 0) return vault;
     return tx.vault.update({
       where: { id: vault.id },
-      data: {
-        balanceCents: { increment: entry.amountCents },
-        status: vault.status === 'PENDING_FUNDING' ? 'ACTIVE' : vault.status,
-      },
+      data: { balanceCents: { increment: entry.amountCents }, ...afterFunding(vault, vault.balanceCents + entry.amountCents) },
     });
   });
 }
@@ -69,22 +77,22 @@ export async function failFunding(paypalOrderId: string, reason?: string) {
   return count > 0;
 }
 
-/** Subscription payment (top-up) arrived. Safe to call twice with the same sale id. */
-export async function addFunding(vaultId: string, amountCents: number, paypalSaleId: string) {
+/**
+ * Money arrived that was paid outside the button flow (subscription payment, or a friend paying a
+ * PayPal money request). Safe to call twice with the same PayPal reference.
+ */
+export async function addFunding(vaultId: string, amountCents: number, paypalSaleId: string, note = 'Subscription top-up') {
   assertAmount(amountCents);
   return prisma.$transaction(async (tx) => {
     const vault = await lockVault(tx, vaultId);
     const existing = await tx.ledgerEntry.findUnique({ where: { paypalRef: paypalSaleId } });
     if (existing) return vault;
     await tx.ledgerEntry.create({
-      data: { vaultId, type: 'FUND', status: 'COMPLETED', amountCents, paypalRef: paypalSaleId, note: 'Subscription top-up' },
+      data: { vaultId, type: 'FUND', status: 'COMPLETED', amountCents, paypalRef: paypalSaleId, note },
     });
     return tx.vault.update({
       where: { id: vaultId },
-      data: {
-        balanceCents: { increment: amountCents },
-        status: vault.status === 'PENDING_FUNDING' ? 'ACTIVE' : vault.status,
-      },
+      data: { balanceCents: { increment: amountCents }, ...afterFunding(vault, vault.balanceCents + amountCents) },
     });
   });
 }
@@ -98,6 +106,7 @@ export async function reserveSpend(input: {
   amountCents: number;
   merchantId: string;
   decisionId?: string;
+  itemId?: string;
   note?: string;
 }): Promise<LedgerEntry> {
   assertAmount(input.amountCents);
@@ -118,6 +127,7 @@ export async function reserveSpend(input: {
         amountCents: input.amountCents,
         merchantId: input.merchantId,
         decisionId: input.decisionId,
+        itemId: input.itemId,
         note: input.note,
       },
     });

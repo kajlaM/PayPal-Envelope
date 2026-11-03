@@ -1,6 +1,8 @@
 import { failFunding, LedgerError, prisma, startLiquidation } from '@kubepay/db';
 import { PolicySchema } from '@kubepay/policy';
 import { emit } from '../events.ts';
+import { resumeStuckCheckouts, syncPendingCheckouts } from './checkout.ts';
+import { cancelOpenFundRequests, syncFundRequests } from './fund-requests.ts';
 import { payOutLiquidation, resumeStuckPayouts, syncPendingPayouts } from './payouts.ts';
 
 // Expiry sweeper (Step 10). Runs every minute: settles payouts, then closes expired vaults and
@@ -16,10 +18,24 @@ export async function sweepOnce(now = new Date()): Promise<SweepResult[]> {
   // 1. Settle payouts that finished (webhook backup), so expired vaults are not held up by them.
   await resumeStuckPayouts().catch((err) => console.error('Sweeper: resume payouts failed:', (err as Error).message));
   await syncPendingPayouts().catch((err) => console.error('Sweeper: payout sync failed:', (err as Error).message));
+  await resumeStuckCheckouts().catch((err) => console.error('Sweeper: resume Checkout purchases failed:', (err as Error).message));
+  await syncPendingCheckouts().catch((err) => console.error('Sweeper: Checkout sync failed:', (err as Error).message));
+  // "Ask a friend": credit vaults whose friend paid (webhook backup), before unfunded ones expire.
+  await syncFundRequests().catch((err) => console.error('Sweeper: money request sync failed:', (err as Error).message));
 
   // 2. Never funded: cancel the open order so a late approval is not captured into a dead vault.
   const unfunded = await prisma.vault.findMany({ where: { status: 'PENDING_FUNDING', expiresAt: { lt: now } } });
   for (const vault of unfunded) {
+    // A friend asked to fund it can no longer pay. If they just paid, the vault is funded instead.
+    const asked = await cancelOpenFundRequests(vault.id, 'The vault expired before it was funded.').catch((err) => {
+      console.error(`Sweeper: cancelling money requests of vault ${vault.id} failed:`, (err as Error).message);
+      return null;
+    });
+    if (asked === null) continue; // try again on the next run
+    if (asked.some((r) => r.status === 'PAID')) {
+      results.push({ vaultId: vault.id, action: 'funded by a friend at the last moment' });
+      continue;
+    }
     const orders = await prisma.ledgerEntry.findMany({ where: { vaultId: vault.id, type: 'FUND', status: 'PENDING' } });
     for (const o of orders) if (o.paypalRef) await failFunding(o.paypalRef, 'vault expired before funding');
     await prisma.vault.update({ where: { id: vault.id }, data: { status: 'EXPIRED', nextAgentRunAt: null } });
@@ -27,11 +43,11 @@ export async function sweepOnce(now = new Date()): Promise<SweepResult[]> {
     results.push({ vaultId: vault.id, action: 'expired before funding' });
   }
 
-  // 3. Expired with money in it (ACTIVE, or EXPIRED after a failed refund): refund the balance.
+  // 3. Expired with money in it (ACTIVE, still SAVING, or EXPIRED after a failed refund): refund the balance.
   const expired = await prisma.vault.findMany({
     where: {
       expiresAt: { lt: now },
-      OR: [{ status: 'ACTIVE' }, { status: 'EXPIRED', balanceCents: { gt: 0 } }],
+      OR: [{ status: 'ACTIVE' }, { status: 'SAVING' }, { status: 'EXPIRED', balanceCents: { gt: 0 } }],
     },
     include: { policies: { orderBy: { version: 'desc' }, take: 1 } },
   });
@@ -42,11 +58,11 @@ export async function sweepOnce(now = new Date()): Promise<SweepResult[]> {
 }
 
 async function refundVault(vault: { id: string; status: string; policies: { policyJson: unknown }[] }): Promise<string> {
-  await prisma.vault.update({ where: { id: vault.id }, data: { nextAgentRunAt: null } }); // stop the shopping agent
+  await prisma.vault.update({ where: { id: vault.id }, data: { nextAgentRunAt: null, nextChargeAt: null } }); // stop the agent and savings payments
 
   const policy = PolicySchema.safeParse(vault.policies[0]?.policyJson);
   if (policy.success && !policy.data.liquidation.auto_refund) {
-    if (vault.status === 'ACTIVE') {
+    if (vault.status === 'ACTIVE' || vault.status === 'SAVING') {
       await prisma.vault.update({ where: { id: vault.id }, data: { status: 'EXPIRED' } });
       emit('vault:updated', { vaultId: vault.id });
     }

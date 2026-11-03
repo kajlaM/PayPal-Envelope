@@ -2,7 +2,7 @@ import type { Server } from 'socket.io';
 
 // Live updates for the dashboard (Step 13). Each event carries the vault id so the UI can refetch.
 
-export type KubePayEvent = 'vault:updated' | 'decision:created' | 'ledger:updated' | 'agent:step';
+export type KubePayEvent = 'vault:updated' | 'decision:created' | 'ledger:updated' | 'agent:step' | 'policy:changed' | 'proposal:created' | 'savings:failed';
 
 type Payload = { vaultId: string; [key: string]: unknown };
 type Listener = (event: KubePayEvent, payload: Payload) => void;

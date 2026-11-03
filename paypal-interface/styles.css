@@ -2590,3 +2590,205 @@ body {
 }
 
 .vd-policy-history li:last-child { border-bottom: none; }
+
+/* ---------- Control setting (Ask me / Ask above / Autopilot) ---------- */
+.control-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.control-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pp-gray-200);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.control-option:has(input[type="radio"]:checked) {
+  border-color: var(--pp-blue-primary);
+  background: #F2F8FD;
+}
+
+.control-option input[type="radio"] { margin-top: 3px; }
+.control-option strong { display: block; color: var(--pp-navy-dark); }
+.control-option small { color: var(--pp-gray-500); font-size: 0.8rem; }
+
+.control-above .form-input {
+  display: inline-block;
+  width: 80px;
+  height: 28px;
+  padding: 2px 6px;
+  font-size: 0.8rem;
+}
+
+.vd-control-edit .control-picker { margin: 4px 0 8px; }
+.vd-control-edit .vd-approval-actions { flex-wrap: wrap; }
+
+/* ---------- Ask me: the agent's options ---------- */
+.vd-options {
+  background: #F2F8FD;
+  border-radius: var(--radius-md);
+  border-top: none;
+  padding: 16px;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.option-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--pp-white);
+  border: 1px solid var(--pp-gray-200);
+  border-radius: var(--radius-md);
+}
+
+.option-card .option-title { font-weight: 600; color: var(--pp-navy-dark); line-height: 1.3; overflow-wrap: anywhere; }
+.option-card .option-price { font-size: 1.05rem; font-weight: 700; }
+.option-card ul { list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: 0.8rem; }
+.option-card .option-pros li { color: #0A7A3E; }
+.option-card .option-cons li { color: #A3361A; }
+.option-card button { margin-top: auto; }
+
+/* ---------- Shopping-list vaults ---------- */
+.vd-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vd-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--pp-gray-200);
+  border-radius: var(--radius-md);
+}
+
+.vd-list li.vd-list-done { background: #F0FAF4; }
+.money-leftover { color: #0A7A3E; font-weight: 600; }
+
+/* ---------- Paying in over time (savings) ---------- */
+.control-every {
+  display: inline-block;
+  width: auto;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 0.8rem;
+}
+
+.vd-savings {
+  background: #F5F2FD;
+  border-radius: var(--radius-md);
+  border-top: none;
+  padding: 16px;
+}
+
+/* ---------- Funding a vault: Pay with PayPal / PayPal Pay Later / Ask a friend ---------- */
+.funding-option { align-items: center; }
+.funding-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: var(--pp-white);
+  background: var(--pp-blue-deep);
+}
+.funding-icon.later { background: var(--pp-gold); color: var(--pp-navy-dark); }
+.funding-icon.friend { background: var(--pp-blue-primary); }
+
+.friend-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--pp-blue-light);
+}
+
+.paylater-box {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--pp-gray-200);
+  border-radius: var(--radius-md);
+}
+.paylater-message { margin-bottom: 8px; }
+.paylater-note { margin-top: 8px; color: var(--pp-gray-700); }
+.paylater-note:empty { display: none; }
+
+.vd-fund {
+  background: #F2F8FD;
+  border-radius: var(--radius-md);
+  border-top: none;
+  padding: 16px;
+}
+.vd-fund .vd-approval-actions { flex-wrap: wrap; }
+.fund-options { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.fund-option {
+  background: var(--pp-white);
+  border: 1px solid var(--pp-gray-200);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fund-option-head { display: flex; gap: 10px; align-items: flex-start; }
+.fund-option-head strong { display: block; color: var(--pp-navy-dark); }
+.fund-option-head small { color: var(--pp-gray-500); font-size: 0.8rem; }
+.vd-paylater { max-width: 360px; }
+.fund-friend-row .form-input { flex: 1 1 180px; min-width: 0; }
+
+/* Money requests for you (a friend asked you to fund their vault) */
+.money-requests {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: #FFF8E6;
+  border: 1px solid #F5E1A4;
+}
+.money-requests-title { font-size: 0.95rem; color: var(--pp-navy-dark); margin-bottom: 8px; }
+.money-request {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-top: 1px solid #F5E1A4;
+}
+.money-request:first-of-type { border-top: none; }
+.money-request-text { flex: 1 1 240px; min-width: 0; font-size: 0.9rem; }
+.money-request-amount { font-weight: 700; font-size: 1.05rem; color: var(--pp-navy-dark); }
+.money-request-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Vault purchase paid with PayPal Checkout (buyer protection) */
+.checkout-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--pp-green-light);
+  color: var(--pp-green);
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: 1px;
+}

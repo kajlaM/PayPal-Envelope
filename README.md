@@ -25,7 +25,7 @@ User ──Subscriptions API (monthly auto top-up)──► KubePay Platform
 
 - **Vault** = a row in our database with a budget, a balance, and a policy. The real money sits in the platform account. Our **ledger** tracks how much belongs to each vault.
 - **Fund a vault** → the user pays the platform through the **Orders API** (PayPal button).
-- **Agent spends** → the Policy Engine approves the payment, then the platform pays the merchant with the **Payouts API**.
+- **Agent spends** → the Policy Engine approves the payment, then the platform pays the merchant with **PayPal Checkout** (Orders API, merchant = payee, paid from the platform's saved PayPal: a real purchase with buyer protection). Until the platform account is saved (`npm run setup:checkout -w apps/api`), or if PayPal refuses a Checkout payment, it uses the **Payouts API** instead. Utility bills always use Payouts.
 - **Vault expires** → the platform returns the leftover balance to the user with the **Payouts API**.
 - Real store names such as "BestBuy" map to our sandbox merchant accounts through a `merchants` table, because real stores cannot receive sandbox money.
 
@@ -402,6 +402,7 @@ The backend POSTs to `ZAPIER_HOOK_URL` on `BLOCK`, `NEEDS_HUMAN`, `LIQUIDATED`, 
 
 - Body: `{ event, vault: {id, name, type, status}, amount, merchant, reasons, message, dashboard_link, timestamp }`. `message` is the same plain-English sentence as the audit log; `dashboard_link` uses `DASHBOARD_URL` (default `http://localhost:5173`).
 - Sent in the background from the API's event stream (`apps/api/src/services/notify.ts`), once per decision / ledger status. A human approving or rejecting sends no alert.
+- **Answer from the email (two-way):** the "approval needed" email has **Approve** / **Reject** buttons, and the "options ready" email (Ask me vaults) has **Pick 1/2/3** / **None of these**. Each button is a signed link (`INTERNAL_API_KEY`) for that one decision or option, valid 24 hours, and it opens a confirm page on the wallet site (`SITE_URL/email/act`); opening the link never acts by itself. Approve and Pick need the vault owner's password there and re-check the vault rules; Reject and None need none. A decision or option can only be answered once.
 
 ---
 
@@ -507,3 +508,52 @@ Do this **together first**: agree on the DB schema (Step 3.3), the `SpendRequest
 - Member 1 gives Member 2 the `/spend` route and Member 3 the GET routes plus socket events.
 - Member 2 gives Member 1 the `evaluate(request)` function and Member 3 the `/api/vaults` compile response.
 - Member 3 reports bugs found during testing to whoever owns that step.
+
+---
+
+## 18. Changes on 4 Nov 2026
+
+New ways to fund a vault, buyer-protected purchases, and answering approvals from email. Everything else works as before.
+
+### Funding a vault (three options, PayPal only, no cards or Venmo)
+- **Pay with PayPal:** unchanged. The amount is taken from the customer's saved PayPal account.
+- **PayPal Pay Later (new):** the PayPal JS SDK Pay Later button. The vault gets the full amount at once and the customer pays PayPal back in 4 payments (Pay in 4: US accounts, $30 to $1,500). Uses the same Orders API order and capture as normal funding.
+- **Ask a friend on PayPal (new):** the platform account sends a PayPal money request (Invoicing API) to the friend's PayPal email. When the friend pays, the money goes straight into the vault, not the owner's account.
+  - New table `fund_requests` (migration `20261103120000_fund_requests`).
+  - New files: `packages/paypal/src/requests.ts`, `apps/api/src/services/fund-requests.ts`, `apps/api/src/routes/fund-requests.ts`.
+  - New routes: `POST /api/vaults/:id/fund/requests` (send), `/fund/requests/sync` (check), `/fund/requests/:requestId/cancel`, plus `GET /api/fund-requests?payerEmail=` and `POST /api/fund-requests/:id/sync` for the friend's side.
+  - Payment is picked up by the `INVOICING.INVOICE.PAID` webhook (now also registered on the platform app), the background tick, or "Check now".
+  - Requests still open when a vault expires are cancelled by the sweeper. `/fund/order` refuses while a friend request is open, so a vault can't be funded twice.
+  - `addFunding()` in `packages/db/src/ledger.ts` takes an optional ledger note ("Paid by … (PayPal money request)").
+  - Leftover money still goes back to the vault owner when the vault closes.
+
+### Vault purchases paid with PayPal Checkout (new)
+- The vault still pays by itself. Now the platform pays the shop with a **PayPal Checkout purchase** (Orders API, shop = payee, paid from the platform's saved PayPal) instead of a Payout. This gives buyer protection, a receipt, item details for the shop, and a normal refund button.
+- One-time setup: `npm run setup:checkout -w apps/api`. Log in as `PLATFORM_SANDBOX_EMAIL` and approve. The account is saved in `paypal_links`.
+- **Falls back to Payouts** if the platform account isn't saved yet, or PayPal clearly refuses (nothing was paid). `MERCHANT_PAYMENTS=payouts` in `.env` always uses Payouts. Utility bills always use Payouts.
+- **Never pays twice:** the ledger entry is marked `CHECKOUT` before PayPal is called, and an unclear result is only retried as the same order (ledger entry id = PayPal-Request-Id and invoice id).
+- New column `ledger_entries.paidVia` (`CHECKOUT` / `PAYOUTS`, migration `20261103130000_checkout_spends`).
+- New files: `packages/paypal/src/checkout.ts`, `apps/api/src/services/checkout.ts`, `apps/api/scripts/setup-checkout.ts`.
+- Changed: `spend.ts` (Checkout first), `payouts.ts` (skips Checkout entries), `sweeper.ts` (resumes and settles Checkout purchases), `webhooks.ts` (`PAYMENT.CAPTURE.COMPLETED` / `DENIED` for purchases), `POST /api/vaults/:id/sync`, and `packages/agents/src/kubepay.ts` (reads either payment status).
+
+### Answer from the email (two-way Zapier alerts, email only)
+- The "approval needed" email has **Approve / Reject** buttons. The "options ready" email (Ask me vaults) has **Pick 1/2/3 / None of these**.
+- Each button is a signed link (`INTERNAL_API_KEY`) for one decision or option. It expires after 24 hours, can only be answered once, and opens a confirm page on the wallet site (`SITE_URL/email/act`).
+- Opening the link never acts by itself (mail apps and scanners open links on their own). **Approve and Pick need the owner's password** and re-check the vault rules. Reject and None need no password.
+- New: `packages/policy/src/approval-links.ts` (+ tests). Changed: `emails.ts` (action buttons, + test), `notify.ts` (signs the links). No Zap changes needed.
+
+### Wallet site (`paypal-interface/`)
+- Create-vault review step: a **"How do you want to fund it?"** picker (Pay with PayPal / PayPal Pay Later / Ask a friend), with friend email suggestions.
+- A vault waiting for its money shows **"Fund this vault"** with the same three options, or **"Waiting for your friend"** (open PayPal request, copy link, check now, cancel).
+- **"Money requests for you"** box: shows the requests friends sent you, with "Pay with PayPal" and "I've paid".
+- Activity shows who funded the vault, and a **🛡 PayPal Checkout** badge on purchases paid that way.
+- New server routes: `/config`, `/me/vaults/:id/fund/{paypal,order,capture,friend}`, `/me/vaults/:id/fund/requests/...`, `/me/requests`, `/me/requests/:id/check`, and `GET/POST /email/act` (email confirm page).
+
+### Dashboard (`apps/web`)
+- The fund button shows **PayPal + Pay Later** only (cards and Venmo turned off).
+
+### Setup and config
+- Migrations applied: `npm run db:deploy` (`fund_requests`, `checkout_spends`).
+- `.env.example`: notes for `SITE_URL` (also used by the email buttons) and the new `MERCHANT_PAYMENTS`.
+- Re-run `npm run setup:webhooks -w packages/paypal -- https://<tunnel>` so the platform app also receives invoice events.
+- Typecheck passes. Unit tests pass: policy 32, api 10, agents 14, audit 4, paypal 2.

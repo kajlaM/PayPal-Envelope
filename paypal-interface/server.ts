@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { completeFunding, failFunding, prisma, startFunding } from '@kubepay/db'; // also loads the repo-root .env
 import { PayPalApiError } from '@kubepay/paypal';
+import { SAVINGS_INTERVALS, savingsExpiry, verifyApprovalLink, type ApprovalAction } from '@kubepay/policy';
 import { ACCOUNTS, type Account } from './accounts.ts';
 import { autoLink, chargeSavedPayPal, finishLink, getLink, LinkError, startLink, unlink, type PayPalLink } from './paypal-link.ts';
 import { balanceChanged, sandboxBalance } from './sandbox-balance.ts';
@@ -74,7 +75,7 @@ function loggedIn(req: Request): Account {
 async function kubepayUser(account: Account) {
   return prisma.user.upsert({
     where: { paypalEmail: account.sandboxEmail },
-    update: {},
+    update: { name: account.name }, // alert emails greet the customer by this name
     create: { name: account.name, paypalEmail: account.sandboxEmail },
   });
 }
@@ -127,6 +128,8 @@ async function profile(account: Account) {
     paypalLinked: link ? { email: link.email, linkedAt: link.linkedAt } : null,
     paypalLinking: !link && linking.has(account.username),
     paypalLinkError: link ? null : linkErrors.get(account.username) ?? null,
+    // "Ask a friend": the other demo customers, offered as suggestions (any PayPal email works).
+    friends: Object.values(ACCOUNTS).filter((a) => a.username !== account.username).map((a) => ({ name: a.name, email: a.sandboxEmail })),
   };
 }
 
@@ -138,10 +141,13 @@ class KubePayError extends Error {
   }
 }
 
-async function kubepay<T = any>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+async function kubepay<T = any>(method: 'GET' | 'POST', path: string, body?: unknown, internal = false): Promise<T> {
   const res = await fetch(`${KUBEPAY_API}${path}`, {
     method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: {
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(internal ? { 'x-internal-key': SECRET! } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -187,9 +193,14 @@ async function payIntoVault(vault: { id: string; name: string }, amountCents: nu
   if (!known) await startFunding(vault.id, amountCents, order.orderId);
 
   if (order.status === 'COMPLETED') {
-    // Paid in one step (saved account): credit the vault like the capture route does.
-    if (order.captureStatus === 'COMPLETED') await completeFunding(order.orderId);
-    else if (order.captureStatus === 'DECLINED' || order.captureStatus === 'FAILED') {
+    // Paid in one step (saved account): credit the vault like the capture route does, then tell
+    // KubePay so live updates and the "vault is live" email go out.
+    if (order.captureStatus === 'COMPLETED') {
+      await completeFunding(order.orderId);
+      await kubepay('POST', `/api/vaults/${vault.id}/fund/recorded`, { orderId: order.orderId }, true).catch((err) => {
+        console.error(`Could not report funding of vault ${vault.id}:`, (err as Error).message);
+      });
+    } else if (order.captureStatus === 'DECLINED' || order.captureStatus === 'FAILED') {
       await failFunding(order.orderId, `capture ${order.captureStatus}`);
       throw new HttpError(402, 'PAYMENT_DECLINED', { message: 'PayPal declined the payment.' });
     } else {
@@ -217,7 +228,7 @@ async function checkBalance(account: Account, amountCents: number) {
 }
 
 /** Amount + description -> policy written by the KubePay AI. The amount the customer typed is the budget. */
-async function draftPolicy(amountInput: unknown, descriptionInput: unknown) {
+async function draftPolicy(amountInput: unknown, descriptionInput: unknown, controlInput?: unknown, paymentInput?: unknown) {
   const amount = Math.round(Number(amountInput) * 100) / 100;
   const description = String(descriptionInput ?? '').trim();
   if (!(amount >= 1) || amount > 10_000) throw new HttpError(400, 'INVALID_AMOUNT', { message: 'Enter an amount between $1 and $10,000.' });
@@ -229,8 +240,64 @@ async function draftPolicy(amountInput: unknown, descriptionInput: unknown) {
   const rules = draft.policy.rules;
   draft.policy.allocated_budget = amount;
   rules.max_single_transaction = Math.min(rules.max_single_transaction, amount);
-  if (rules.human_approval_above !== undefined && rules.human_approval_above >= amount) delete rules.human_approval_above;
+  setControl(draft.policy, controlInput, draft.warnings);
+  setPayment(draft.policy, paymentInput, draft.warnings);
   return { ...draft, sourceText: text };
+}
+
+/**
+ * How the customer pays, as picked on the form ({ mode: 'NOW' | 'OVER_TIME', amount, every }), wins over
+ * what the AI read. Over time, the vault lasts until the last payment (plus time to shop).
+ */
+function setPayment(policy: any, payment: any, warnings: string[] = []) {
+  if (payment?.mode === 'NOW') {
+    if (policy.vault_type === 'SAVINGS') {
+      throw new HttpError(400, 'SAVINGS_PAID_OVER_TIME', { message: 'A savings vault is paid in bit by bit: pick "Pay over time".' });
+    }
+    delete policy.savings;
+  } else if (payment?.mode === 'OVER_TIME') {
+    if (policy.vault_type === 'UTILITY') throw new HttpError(400, 'BILLS_PAID_NOW', { message: 'Bill vaults are paid in full now.' });
+    const amount = Math.round(Number(payment.amount) * 100) / 100;
+    if (!(amount > 0)) throw new HttpError(400, 'INVALID_PAYMENT_AMOUNT', { message: 'Enter how much to pay in each time.' });
+    if (amount >= policy.allocated_budget) throw new HttpError(400, 'PAYMENT_NOT_SMALLER', { message: 'Each payment must be smaller than the vault amount (or pay it all now).' });
+    if (!SAVINGS_INTERVALS.includes(payment.every)) throw new HttpError(400, 'INVALID_INTERVAL', { message: 'Pick how often to pay in.' });
+    policy.savings = { amount_per_payment: amount, every: payment.every };
+  }
+  if (policy.savings) {
+    const needed = savingsExpiry(policy, new Date());
+    if (needed.getTime() - Date.now() > 730 * 86_400_000) {
+      throw new HttpError(400, 'PLAN_TOO_LONG', { message: 'That plan takes longer than 2 years. Pay more each time, or more often.' });
+    }
+    if (new Date(policy.rules.expiry_timestamp) < needed) {
+      policy.rules.expiry_timestamp = needed.toISOString();
+      warnings.push('The vault lasts until after the last payment.');
+    }
+  }
+}
+
+const CONTROL_MODES = ['ASK_ME', 'ASK_ABOVE', 'AUTOPILOT'];
+
+/**
+ * The control setting the customer picked on the form ({ mode, above }) wins over what the AI read
+ * from the description. "Ask above" an amount the vault can never reach means it never asks: Autopilot.
+ */
+function setControl(policy: any, control: any, warnings: string[] = []) {
+  const rules = policy.rules;
+  if (control && CONTROL_MODES.includes(control.mode)) {
+    rules.control_mode = control.mode;
+    if (control.mode === 'ASK_ABOVE') {
+      const above = Math.round(Number(control.above) * 100) / 100;
+      if (!(above > 0)) throw new HttpError(400, 'INVALID_APPROVAL_AMOUNT', { message: 'Enter the amount above which the AI must ask you.' });
+      rules.human_approval_above = above;
+    } else {
+      delete rules.human_approval_above;
+    }
+  }
+  if (rules.human_approval_above !== undefined && rules.human_approval_above >= policy.allocated_budget) delete rules.human_approval_above;
+  if (rules.control_mode === 'ASK_ABOVE' && rules.human_approval_above === undefined) {
+    rules.control_mode = 'AUTOPILOT';
+    warnings.push('The approval amount is not below the vault amount, so the AI never needs to ask: set to Autopilot.');
+  }
 }
 
 // ---------- Pass-through to the KubePay API ----------
@@ -318,6 +385,11 @@ app.post('/auth/login', async (req, res) => {
   res.json(me);
 });
 
+// PayPal JS SDK settings for the Pay Later button (the client id is public by design).
+app.get('/config', (_req, res) => {
+  res.json({ paypalClientId: process.env.VITE_PAYPAL_CLIENT_ID?.trim() || process.env.PAYPAL_CLIENT_ID?.trim() || null });
+});
+
 app.post('/auth/logout', (req, res) => {
   setCookie(req, res, '', 0);
   res.json({ ok: true });
@@ -387,21 +459,70 @@ app.get('/me/vaults', async (req, res) => {
 // Step 1: amount + description -> AI writes the policy (KubePay compiler). Nothing is saved.
 app.post('/me/vaults/preview', async (req, res) => {
   loggedIn(req);
-  res.json(await draftPolicy(req.body?.amount, req.body?.description));
+  res.json(await draftPolicy(req.body?.amount, req.body?.description, req.body?.control, req.body?.payment));
 });
 
-// Step 2: password confirmed -> create the vault, pay it from the saved PayPal account, start the AI.
+// How a new vault gets its money:
+//   PAYPAL    taken from the customer's saved PayPal account right away (no popup)
+//   PAYLATER  PayPal Pay Later: the vault gets the full amount now, the customer pays PayPal back in parts
+//             (the vault is created here; the browser then opens the PayPal Pay Later window)
+//   FRIEND    a PayPal money request to a friend's PayPal email; their payment goes straight into the vault
+const FUNDING_METHODS = ['PAYPAL', 'PAYLATER', 'FRIEND'] as const;
+type FundingMethod = (typeof FUNDING_METHODS)[number];
+
+/** Sends the "Ask a friend" PayPal money request for a vault waiting for its money. */
+function askFriend(account: Account, vaultId: string, friendEmail: unknown, message: unknown) {
+  return kubepay('POST', `/api/vaults/${vaultId}/fund/requests`, {
+    payerEmail: String(friendEmail ?? '').trim(),
+    message: typeof message === 'string' && message.trim() ? message.trim() : undefined,
+    requesterName: account.name,
+  });
+}
+
+// Step 2: password confirmed -> create the vault, fund it the chosen way, start the AI.
 app.post('/me/vaults', async (req, res) => {
   const account = loggedIn(req);
   if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
-  const link = await linkFor(account, req);
-  const { userId } = await profile(account);
-  await checkBalance(account, Math.round(Number(req.body?.policy?.allocated_budget) * 100));
+  const funding: FundingMethod = req.body?.funding ?? 'PAYPAL';
+  if (!FUNDING_METHODS.includes(funding)) throw new HttpError(400, 'INVALID_FUNDING', { message: 'Pick how to fund the vault.' });
+  const plan = req.body?.policy?.savings;
+  if (plan && funding !== 'PAYPAL') {
+    throw new HttpError(400, 'SAVINGS_PAID_BY_OWNER', { message: 'A vault paid in over time is paid from your own PayPal.' });
+  }
+  if (funding === 'FRIEND' && !String(req.body?.friendEmail ?? '').trim()) {
+    throw new HttpError(400, 'FRIEND_EMAIL_REQUIRED', { message: "Enter your friend's PayPal email." });
+  }
+  const { userId, sandboxEmail } = await profile(account);
+  if (funding === 'FRIEND' && String(req.body.friendEmail).trim().toLowerCase() === sandboxEmail.toLowerCase()) {
+    throw new HttpError(400, 'CANNOT_ASK_YOURSELF', { message: 'That is your own PayPal. Pick "Pay with PayPal" instead.' });
+  }
+  // Only "Pay with PayPal" takes money from the saved account (Pay Later and friends pay on PayPal itself).
+  const link = funding === 'PAYPAL' ? await linkFor(account, req) : null;
+  // Paid over time: only the first payment is taken now.
+  const firstCents = Math.round(Number(plan ? Math.min(plan.amount_per_payment, req.body.policy.allocated_budget) : req.body?.policy?.allocated_budget) * 100);
+  if (funding === 'PAYPAL') await checkBalance(account, firstCents);
 
   const vault = await kubepay('POST', '/api/vaults', { policy: req.body.policy, sourceText: req.body.sourceText, userId });
+  if (funding === 'PAYLATER') return res.status(201).json({ ...(await ownVault(account, vault.id)), funding });
+  if (funding === 'FRIEND') {
+    try {
+      const request = await askFriend(account, vault.id, req.body.friendEmail, req.body.friendMessage);
+      return res.status(201).json({ ...(await ownVault(account, vault.id)), funding, request });
+    } catch (err) {
+      // The vault stays "awaiting funding": it can be funded another way from its page.
+      const message = err instanceof KubePayError ? err.message : (err as Error).message;
+      throw new HttpError(502, 'REQUEST_FAILED', { message, vaultId: vault.id });
+    }
+  }
   try {
-    await payIntoVault(vault, vault.budgetCents, link);
-    startAgent(vault.id); // the AI takes over right away (watch mode keeps shopping vaults looking)
+    if (vault.savingsPerPaymentCents !== null && vault.savingsPerPaymentCents !== undefined) {
+      // KubePay takes it from the linked account (the same way it takes every later payment).
+      const first = await kubepay('POST', `/api/vaults/${vault.id}/savings/charge`, {}, true);
+      if (first.status === 'ACTIVE' && vault.type !== 'SAVINGS') startAgent(vault.id);
+    } else {
+      await payIntoVault(vault, vault.budgetCents, link!);
+      startAgent(vault.id); // the AI takes over right away (watch mode keeps shopping vaults looking)
+    }
   } catch (err) {
     // The vault stays "awaiting funding"; KubePay's sweeper closes it when it expires.
     if (err instanceof HttpError) throw Object.assign(err, { extra: { ...err.extra, vaultId: vault.id } });
@@ -417,13 +538,121 @@ app.get('/me/vaults/:id', async (req, res) => {
   res.json(await ownVault(loggedIn(req), req.params.id));
 });
 
+// ---- Fund a vault that is waiting for its money ----
+
+/** The vault, if it belongs to this customer and still waits for its money. */
+async function unfundedVault(account: Account, vaultId: string) {
+  const vault = await ownVault(account, vaultId);
+  if (vault.status !== 'PENDING_FUNDING') throw new HttpError(409, 'VAULT_ALREADY_FUNDED', { message: 'This vault already has its money.' });
+  return vault;
+}
+
+function noOpenRequest(vault: { fundRequests?: { status: string; payerEmail: string }[] }) {
+  const open = vault.fundRequests?.find((r) => r.status === 'OPEN');
+  if (open) throw new HttpError(409, 'FRIEND_REQUEST_OPEN', { message: `${open.payerEmail} was asked to fund this vault. Cancel that request first.` });
+}
+
+// Pay with PayPal: from the saved PayPal account, no popup. Moves money, so it needs the password.
+app.post('/me/vaults/:id/fund/paypal', async (req, res) => {
+  const account = loggedIn(req);
+  if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  const vault = await unfundedVault(account, req.params.id);
+  noOpenRequest(vault);
+  if (vault.savingsPerPaymentCents !== null && vault.savingsPerPaymentCents !== undefined) {
+    throw new HttpError(409, 'SAVINGS_PLAN', { message: 'This vault is paid in over time: use "Pay now" in its savings plan.' });
+  }
+  const link = await linkFor(account, req);
+  const amountCents = vault.budgetCents - vault.balanceCents;
+  await checkBalance(account, amountCents);
+  try {
+    // One PayPal request id per attempt: a double click returns the same order, a retry after a
+    // declined payment (a FAILED entry) gets a new one.
+    const attempt = (vault.ledger ?? []).filter((e: { type: string }) => e.type === 'FUND').length;
+    await payIntoVault(vault, amountCents, link, `fund-saved-${vault.id}-attempt-${attempt}`);
+  } finally {
+    balanceChanged(account);
+  }
+  startAgent(vault.id);
+  res.json(await ownVault(account, vault.id));
+});
+
+// PayPal Pay Later (JS SDK button): KubePay makes the order, the customer approves it on PayPal
+// choosing Pay Later, then KubePay captures it. The vault gets the full amount at once.
+app.post('/me/vaults/:id/fund/order', async (req, res) => {
+  const vault = await unfundedVault(loggedIn(req), req.params.id);
+  noOpenRequest(vault);
+  res.json(await kubepay('POST', `/api/vaults/${vault.id}/fund/order`, {}));
+});
+
+app.post('/me/vaults/:id/fund/capture', async (req, res) => {
+  const account = loggedIn(req);
+  const vault = await ownVault(account, req.params.id);
+  const orderId = String(req.body?.orderId ?? '');
+  if (!orderId) throw new HttpError(400, 'ORDER_ID_REQUIRED');
+  try {
+    await kubepay('POST', `/api/vaults/${vault.id}/fund/capture`, { orderId });
+  } finally {
+    balanceChanged(account);
+  }
+  startAgent(vault.id);
+  res.json(await ownVault(account, vault.id));
+});
+
+// Ask a friend: a PayPal money request to their PayPal email (no money leaves the customer's PayPal).
+app.post('/me/vaults/:id/fund/friend', async (req, res) => {
+  const account = loggedIn(req);
+  const vault = await unfundedVault(account, req.params.id);
+  if (String(req.body?.friendEmail ?? '').trim().toLowerCase() === account.sandboxEmail.toLowerCase()) {
+    throw new HttpError(400, 'CANNOT_ASK_YOURSELF', { message: 'That is your own PayPal. Pick "Pay with PayPal" instead.' });
+  }
+  const request = await askFriend(account, vault.id, req.body?.friendEmail, req.body?.message);
+  res.status(201).json({ ...(await ownVault(account, vault.id)), request });
+});
+
+app.post('/me/vaults/:id/fund/requests/sync', async (req, res) => {
+  const vault = await ownVault(loggedIn(req), req.params.id);
+  await kubepay('POST', `/api/vaults/${vault.id}/fund/requests/sync`, {});
+  const after = await ownVault(loggedIn(req), req.params.id);
+  if (vault.status === 'PENDING_FUNDING' && after.status === 'ACTIVE') startAgent(vault.id); // the friend paid
+  res.json(after);
+});
+
+app.post('/me/vaults/:id/fund/requests/:requestId/cancel', async (req, res) => {
+  const account = loggedIn(req);
+  const vault = await ownVault(account, req.params.id);
+  await kubepay('POST', `/api/vaults/${vault.id}/fund/requests/${encodeURIComponent(req.params.requestId)}/cancel`, {});
+  res.json(await ownVault(account, vault.id));
+});
+
+// ---- Money requests sent TO this customer (a friend asked them to fund a vault) ----
+
+app.get('/me/requests', async (req, res) => {
+  const account = loggedIn(req);
+  res.json(await kubepay('GET', `/api/fund-requests?payerEmail=${encodeURIComponent(account.sandboxEmail)}&status=OPEN`));
+});
+
+// "I paid it": ask PayPal now instead of waiting for the webhook or the next background check.
+app.post('/me/requests/:id/check', async (req, res) => {
+  const account = loggedIn(req);
+  const mine: { id: string; vaultId: string }[] = await kubepay('GET', `/api/fund-requests?payerEmail=${encodeURIComponent(account.sandboxEmail)}`);
+  const request = mine.find((r) => r.id === req.params.id);
+  if (!request) throw new HttpError(404, 'REQUEST_NOT_FOUND');
+  const result = await kubepay('POST', `/api/fund-requests/${encodeURIComponent(request.id)}/sync`, {});
+  if (result?.status === 'PAID') {
+    startAgent(request.vaultId);
+    balanceChanged(account);
+  }
+  res.json(result);
+});
+
 // ---- Change a vault's policy (what it is for, and its amount) ----
 
 // Step 1: new amount + description -> AI writes the new rules. Says how much money would move.
 app.post('/me/vaults/:id/policy/preview', async (req, res) => {
   const vault = await ownVault(loggedIn(req), req.params.id);
   if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active vault can be changed.' });
-  const draft = await draftPolicy(req.body?.amount, req.body?.description);
+  const draft = await draftPolicy(req.body?.amount, req.body?.description, req.body?.control);
+  draft.policy.savings = vault.policy.savings; // a payment plan cannot be changed (KubePay keeps it too)
   const check = await kubepay('POST', `/api/vaults/${vault.id}/policy`, { policy: draft.policy, sourceText: draft.sourceText, dryRun: true });
   res.json({ ...draft, ...check });
 });
@@ -487,6 +716,243 @@ app.post('/me/vaults/:id/decisions/:decisionId/approve', async (req, res) => {
 app.post('/me/vaults/:id/decisions/:decisionId/reject', async (req, res) => {
   const vault = await ownVault(loggedIn(req), req.params.id);
   res.json(await kubepay('POST', `/api/vaults/${vault.id}/decisions/${encodeURIComponent(req.params.decisionId)}/reject`, {}));
+});
+
+// ---- Paying in over time (savings) ----
+
+// Take the next payment now, instead of waiting for its date. Moves money, so it needs the password.
+app.post('/me/vaults/:id/savings/pay-now', async (req, res) => {
+  const account = loggedIn(req);
+  if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  const vault = await ownVault(account, req.params.id);
+  try {
+    const result = await kubepay('POST', `/api/vaults/${vault.id}/savings/charge`, {}, true);
+    if (result.status === 'ACTIVE' && vault.type !== 'SAVINGS') startAgent(vault.id); // goal reached: shop now
+    res.json(result);
+  } finally {
+    balanceChanged(account);
+  }
+});
+
+for (const action of ['pause', 'resume']) {
+  app.post(`/me/vaults/:id/savings/${action}`, async (req, res) => {
+    const vault = await ownVault(loggedIn(req), req.params.id);
+    res.json(await kubepay('POST', `/api/vaults/${vault.id}/savings/${action}`, {}));
+  });
+}
+
+// ---- Control setting: Ask me / Ask above $X / Autopilot ----
+
+// Switch how much the AI may do alone. Saved as the next rules version (same rules otherwise).
+app.post('/me/vaults/:id/control', async (req, res) => {
+  const account = loggedIn(req);
+  if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  const vault = await ownVault(account, req.params.id);
+  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active vault can be changed.' });
+  if (!CONTROL_MODES.includes(req.body?.control?.mode)) throw new HttpError(400, 'INVALID_CONTROL', { message: 'Pick Ask me, Ask above an amount, or Autopilot.' });
+  const policy = structuredClone(vault.policy);
+  setControl(policy, req.body.control);
+  const saved = await kubepay('POST', `/api/vaults/${vault.id}/policy`, { policy, sourceText: vault.policyHistory?.[0]?.sourceText ?? undefined });
+  startAgent(vault.id); // e.g. switched from Ask me to Autopilot: the agent may buy now
+  res.json({ ...saved, vault: await ownVault(account, vault.id) });
+});
+
+// Ask me: the customer picks one of the agent's options. Picking spends money, so it needs the password.
+app.post('/me/vaults/:id/proposals/:proposalId/choose', async (req, res) => {
+  const account = loggedIn(req);
+  if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  const vault = await ownVault(account, req.params.id);
+  const result = await kubepay('POST', `/api/vaults/${vault.id}/proposals/${encodeURIComponent(req.params.proposalId)}/choose`, { index: Number(req.body?.index) })
+    .catch((err) => {
+      // Blocked by the vault rules: say why (the options stay open, so another one can be picked).
+      if (err instanceof KubePayError && err.body?.decision) {
+        throw new HttpError(403, 'BLOCKED', { message: 'KubePay blocked this option', reasons: (err.body.decision as { reasons: string[] }).reasons });
+      }
+      throw err;
+    });
+  if (result.decision?.result === 'APPROVE') balanceChanged(account);
+  res.json(result);
+});
+
+app.post('/me/vaults/:id/proposals/:proposalId/reject', async (req, res) => {
+  const vault = await ownVault(loggedIn(req), req.params.id);
+  res.json(await kubepay('POST', `/api/vaults/${vault.id}/proposals/${encodeURIComponent(req.params.proposalId)}/reject`, {}));
+  startAgent(vault.id); // look again now, skipping these products
+});
+
+// ---------- Answer from email: Approve / Reject / Pick (two-way alert emails) ----------
+// The buttons in an alert email open these pages. Opening a link never acts on its own (mail apps
+// and virus scanners open links by themselves): the page shows what will happen and the owner
+// presses the button. Approve and Pick move money, so they also need the vault owner's password.
+
+const escHtml = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const money = (dollars: number) => `$${Number(dollars).toFixed(2)}`;
+
+type ActionContext = {
+  vault: any;
+  owner: Account | undefined;
+  open: boolean; // still waiting for an answer
+  heading: string;
+  rows: [string, string][];
+  button: string;
+  needsPassword: boolean;
+};
+
+async function actionContext(action: ApprovalAction): Promise<ActionContext | null> {
+  const vault = await kubepay('GET', `/api/vaults/${encodeURIComponent(action.v)}`).catch(() => null);
+  if (!vault) return null;
+  const owner = Object.values(ACCOUNTS).find((a) => a.sandboxEmail.toLowerCase() === String(vault.user?.paypalEmail ?? '').toLowerCase());
+  const vaultRow: [string, string] = ['Vault', `${vault.name} · ${money(vault.balanceCents / 100)} left`];
+
+  if (action.a === 'approve' || action.a === 'reject') {
+    const d = (vault.decisions ?? []).find((x: any) => x.id === action.d);
+    if (!d) return null;
+    const r = d.requestJson ?? {};
+    return {
+      vault,
+      owner,
+      open: vault.status === 'ACTIVE' && d.result === 'NEEDS_HUMAN' && !d.resolvedBy,
+      heading: action.a === 'approve' ? `Approve ${money(r.amount ?? 0)} at ${r.merchant}?` : `Reject ${money(r.amount ?? 0)} at ${r.merchant}?`,
+      rows: [['Item', r.reason ?? 'a purchase'], ['Shop', r.merchant ?? '?'], ['Price', money(r.amount ?? 0)], vaultRow],
+      button: action.a === 'approve' ? `Approve & pay ${money(r.amount ?? 0)}` : 'Reject',
+      needsPassword: action.a === 'approve',
+    };
+  }
+
+  if (action.a !== 'pick' && action.a !== 'none') return null;
+  const proposalId = action.p;
+  const p = (vault.proposals ?? []).find((x: any) => x.id === proposalId);
+  if (!p) return null;
+  const open = vault.status === 'ACTIVE' && p.status === 'OPEN';
+  if (action.a === 'none') {
+    return {
+      vault, owner, open,
+      heading: 'None of these options?',
+      rows: [...(p.options ?? []).map((o: any, i: number) => [`Option ${i + 1}`, `${o.title} · ${money(o.verified_price ?? o.price)} at ${o.merchant}`] as [string, string]), vaultRow],
+      button: 'None of these: look again',
+      needsPassword: false,
+    };
+  }
+  if (action.a !== 'pick') return null;
+  const index = action.i;
+  const o = p.options?.[index];
+  if (!o) return null;
+  return {
+    vault, owner, open,
+    heading: `Buy option ${index + 1} for ${money(o.verified_price ?? o.price)}?`,
+    rows: [['Item', o.title], ['Shop', o.merchant], ['Price', money(o.verified_price ?? o.price)], vaultRow],
+    button: `Pick & pay ${money(o.verified_price ?? o.price)}`,
+    needsPassword: true,
+  };
+}
+
+function actionPage(res: Response, status: number, page: { title: string; text?: string; rows?: [string, string][]; form?: { token: string; button: string; needsPassword: boolean; error?: string }; tone?: 'good' | 'bad' | 'warn'; vaultId?: string }) {
+  const color = { good: '#007934', bad: '#D9381E', warn: '#B7791F' }[page.tone ?? 'warn'];
+  const rows = (page.rows ?? []).map(([k, v]) => `<tr><td class="k">${escHtml(k)}</td><td>${escHtml(v)}</td></tr>`).join('');
+  const form = page.form ? `
+    <form method="post" action="/email/act">
+      <input type="hidden" name="t" value="${escHtml(page.form.token)}">
+      ${page.form.needsPassword ? `<label for="pw">Confirm with your password</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password" required autofocus>` : ''}
+      ${page.form.error ? `<p class="err" role="alert">${escHtml(page.form.error)}</p>` : ''}
+      <button type="submit">${escHtml(page.form.button)}</button>
+    </form>` : '';
+  res.status(status).type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>KubePay · ${escHtml(page.title)}</title>
+<style>
+  body{margin:0;background:#F5F7FA;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#0C0C0D}
+  .card{max-width:440px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+  .top{background:#003087;color:#fff;padding:16px 22px;font-weight:700}
+  .in{padding:22px}
+  h1{font-size:19px;margin:0 0 12px;color:${color}}
+  p{line-height:1.5;margin:0 0 14px;font-size:15px}
+  table{font-size:14px;margin-bottom:16px;border-collapse:collapse}
+  td{padding:5px 0;vertical-align:top} td.k{color:#6C7378;padding-right:16px;white-space:nowrap}
+  label{display:block;font-size:14px;margin-bottom:6px;color:#444749}
+  input[type=password]{width:100%;box-sizing:border-box;padding:12px;border:1px solid #CBD2D6;border-radius:8px;font-size:15px;margin-bottom:12px}
+  button{width:100%;background:#0070BA;color:#fff;border:0;border-radius:24px;padding:13px;font-size:15px;font-weight:600;cursor:pointer}
+  .err{color:#D9381E;font-size:14px}
+  a{color:#0070BA}
+  @media (max-width:480px){.card{margin:16px}}
+</style></head><body><div class="card"><div class="top">KubePay</div><div class="in">
+  <h1>${escHtml(page.title)}</h1>
+  ${page.text ? `<p>${escHtml(page.text)}</p>` : ''}
+  ${rows ? `<table>${rows}</table>` : ''}
+  ${form}
+  ${page.vaultId ? `<p style="margin-top:16px;font-size:14px"><a href="/?vault=${encodeURIComponent(page.vaultId)}">Open the vault</a></p>` : ''}
+</div></div></body></html>`);
+}
+
+const linkProblem = (reason: 'INVALID' | 'EXPIRED') => reason === 'EXPIRED'
+  ? { title: 'This link has expired', text: 'Email buttons work for 24 hours. Open the vault on the site to answer.' }
+  : { title: 'This link does not work', text: 'Open the vault on the site to answer.' };
+
+app.get('/email/act', async (req, res) => {
+  const token = String(req.query.t ?? '');
+  const checked = verifyApprovalLink(token, SECRET);
+  if (!checked.ok) return actionPage(res, 400, { ...linkProblem(checked.reason), tone: 'bad' });
+  const ctx = await actionContext(checked.action);
+  if (!ctx) return actionPage(res, 404, { ...linkProblem('INVALID'), tone: 'bad' });
+  if (!ctx.open) return actionPage(res, 409, { title: 'Already answered', text: 'This was already handled (or the vault is no longer active). Nothing more to do.', vaultId: ctx.vault.id, tone: 'good' });
+  actionPage(res, 200, {
+    title: ctx.heading,
+    rows: ctx.rows,
+    text: ctx.needsPassword ? 'KubePay checks the vault rules again before paying.' : 'No money moves. The AI looks for something else.',
+    form: { token, button: ctx.button, needsPassword: ctx.needsPassword },
+    vaultId: ctx.vault.id,
+  });
+});
+
+app.post('/email/act', express.urlencoded({ extended: false, limit: '8kb' }), async (req, res) => {
+  const token = String(req.body?.t ?? '');
+  const checked = verifyApprovalLink(token, SECRET);
+  if (!checked.ok) return actionPage(res, 400, { ...linkProblem(checked.reason), tone: 'bad' });
+  const action = checked.action;
+  const ctx = await actionContext(action);
+  if (!ctx) return actionPage(res, 404, { ...linkProblem('INVALID'), tone: 'bad' });
+  if (!ctx.open) return actionPage(res, 409, { title: 'Already answered', text: 'This was already handled (or the vault is no longer active). Nothing more to do.', vaultId: ctx.vault.id, tone: 'good' });
+  const again = (error: string, status = 400) => actionPage(res, status, {
+    title: ctx.heading, rows: ctx.rows, form: { token, button: ctx.button, needsPassword: ctx.needsPassword, error }, vaultId: ctx.vault.id,
+  });
+  if (ctx.needsPassword && !(ctx.owner && passwordOk(ctx.owner, req.body?.password))) return again('Wrong password.', 401);
+
+  const base = `/api/vaults/${encodeURIComponent(ctx.vault.id)}`;
+  const done = (title: string, text: string, tone: 'good' | 'warn' | 'bad' = 'good') => actionPage(res, 200, { title, text, vaultId: ctx.vault.id, tone });
+  try {
+    if (action.a === 'approve') {
+      await kubepay('POST', `${base}/decisions/${encodeURIComponent(action.d)}/approve`, {});
+      if (ctx.owner) balanceChanged(ctx.owner);
+      return done('Approved', 'KubePay is paying the shop now. You will get an email when it is done.');
+    }
+    if (action.a === 'reject') {
+      await kubepay('POST', `${base}/decisions/${encodeURIComponent(action.d)}/reject`, {});
+      return done('Rejected', 'Nothing was paid. The AI will look for something else.');
+    }
+    if (action.a === 'none') {
+      await kubepay('POST', `${base}/proposals/${encodeURIComponent(action.p)}/reject`, {});
+      startAgent(ctx.vault.id); // look again now, skipping these products
+      return done('Got it', 'Nothing was paid. The AI is looking for other options and will email you.');
+    }
+    if (action.a !== 'pick') throw new Error(`Unknown email action ${action.a}`);
+    const result = await kubepay('POST', `${base}/proposals/${encodeURIComponent(action.p)}/choose`, { index: action.i });
+    if (result.decision?.result === 'NEEDS_HUMAN') {
+      return done('One more check', 'Your pick needs one more approval under the vault rules. Look for the approval email, or open the vault.', 'warn');
+    }
+    if (ctx.owner) balanceChanged(ctx.owner);
+    return done('Done', 'KubePay is paying the shop for your pick. You will get an email when it is done.');
+  } catch (err) {
+    const body = err instanceof KubePayError ? err.body : {};
+    const reasons = (body.reasons ?? (body.decision as { reasons?: string[] } | undefined)?.reasons) as string[] | undefined;
+    if (body.error === 'DECISION_NOT_PENDING' || body.error === 'PROPOSAL_NOT_OPEN') {
+      return done('Already answered', 'This was already handled. Nothing more to do.');
+    }
+    if (reasons?.length) {
+      return done('Blocked by your vault rules', `KubePay did not pay: ${reasons.join(', ').toLowerCase().replace(/_/g, ' ')}. Nothing was charged.`, 'bad');
+    }
+    console.error('Email action failed:', (err as Error).message);
+    return done('Something went wrong', 'Nothing was charged. Open the vault to try again.', 'bad');
+  }
 });
 
 // ---------- Static site ----------

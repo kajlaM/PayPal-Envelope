@@ -12,13 +12,21 @@ datasource db {
 enum VaultType {
   SHOPPING
   UTILITY
+  SAVINGS // only saves towards a goal; never spends
 }
 
 enum VaultStatus {
   PENDING_FUNDING
+  SAVING // paid into over time; becomes ACTIVE when it holds its full amount
   ACTIVE
   EXPIRED
   LIQUIDATED
+}
+
+enum SavingsInterval {
+  DAY
+  WEEK
+  MONTH
 }
 
 enum LedgerType {
@@ -63,15 +71,24 @@ model Vault {
   nextAgentRunAt       DateTime?
   lastAgentRunAt       DateTime?
   lastAgentOutcome     String?
+  // Paying in over time (savings): the saved PayPal account is charged this much every interval
+  savingsPerPaymentCents Int?
+  savingsEvery           SavingsInterval?
+  nextChargeAt           DateTime?
+  chargeFailures         Int              @default(0) // declined payments in a row
+  savingsPausedAt        DateTime?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   user                 User          @relation(fields: [userId], references: [id])
   policies             Policy[]
   ledger               LedgerEntry[]
   decisions            Decision[]
+  proposals            Proposal[]
+  fundRequests         FundRequest[]
 
   @@index([status, expiresAt])
   @@index([status, nextAgentRunAt])
+  @@index([status, nextChargeAt])
   @@map("vaults")
 }
 
@@ -97,6 +114,8 @@ model LedgerEntry {
   paypalRef   String?      @unique // order id, capture id, sale id or payout item id
   merchantId  String?
   decisionId  String?      @unique
+  itemId      String?      // shopping-list vaults: the list item this payment buys
+  paidVia     String?      // SPEND: CHECKOUT (PayPal Checkout purchase, paypalRef = capture id) or PAYOUTS
   note        String?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -133,6 +152,70 @@ model Decision {
 
   @@index([vaultId, createdAt])
   @@map("decisions")
+}
+
+enum ProposalStatus {
+  OPEN      // waiting for the owner to pick one
+  CHOSEN    // the owner picked one (decisionId says how the purchase went)
+  REJECTED  // the owner wants none of them: the agent looks again
+  CANCELLED // replaced by newer options, or the rules changed
+}
+
+// "Ask me" vaults: the agent's top options (max 3, each with pros and cons) for the owner to pick from.
+model Proposal {
+  id          String         @id @default(cuid())
+  vaultId     String
+  itemId      String?        // shopping-list vaults: which item the options are for
+  options     Json           // [{ title, merchant, price, url, category, rating, delivery_days, condition, verified_price, pros, cons }]
+  summary     String?
+  status      ProposalStatus @default(OPEN)
+  chosenIndex Int?
+  decisionId  String?
+  createdAt   DateTime       @default(now())
+  resolvedAt  DateTime?
+  vault       Vault          @relation(fields: [vaultId], references: [id])
+
+  @@index([vaultId, status])
+  @@map("proposals")
+}
+
+enum FundRequestStatus {
+  OPEN      // sent; waiting for the friend to pay it on PayPal
+  PAID      // the friend paid: the money is in the vault (FUND entry, paypalRef = invoiceId)
+  CANCELLED // the owner cancelled it, paid another way, or the vault expired first
+}
+
+// "Ask a friend": a PayPal money request (Invoicing API, sent by the KubePay platform account) to a
+// friend's PayPal email. When the friend pays it, the money goes straight into this vault.
+model FundRequest {
+  id            String            @id @default(cuid())
+  vaultId       String
+  invoiceId     String            @unique // PayPal invoice id
+  payerEmail    String            // the friend's PayPal account
+  requesterName String?
+  message       String?
+  amountCents   Int
+  payUrl        String?           // PayPal page where the friend pays
+  status        FundRequestStatus @default(OPEN)
+  createdAt     DateTime          @default(now())
+  resolvedAt    DateTime?
+  vault         Vault             @relation(fields: [vaultId], references: [id])
+
+  @@index([vaultId, status])
+  @@index([payerEmail, status])
+  @@map("fund_requests")
+}
+
+// A customer's PayPal account saved with the Vault API (payment token), so KubePay can charge it
+// without a popup: the first payment into a vault, top-ups, and savings payments.
+model PaypalLink {
+  email          String   @id // the PayPal (sandbox) account; matches User.paypalEmail
+  username       String?  // site login that linked it
+  paymentTokenId String
+  customerId     String
+  linkedAt       DateTime
+
+  @@map("paypal_links")
 }
 
 model PaypalEvent {

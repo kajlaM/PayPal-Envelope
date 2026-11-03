@@ -127,8 +127,17 @@ async function main() {
     }
   }
 
+  // The Cloudflare link comes first: the API puts it in alert emails (SITE_URL), so their
+  // "Open the vault" links work from any phone. cloudflared prints it before the site is up.
+  let url = `http://localhost:${SITE_PORT}`;
+  if (!LOCAL_ONLY) {
+    log('up', 'Opening the Cloudflare link (first run downloads cloudflared)...');
+    url = await startTunnel();
+    log('up', `Got ${url}`);
+  }
+
   log('up', 'Starting the KubePay API...');
-  start('api', 'npm', ['run', 'api:start']);
+  start('api', 'npm', ['run', 'api:start'], { SITE_URL: url });
   await waitFor('api', `http://localhost:${API_PORT}/health`, 60_000);
   log('up', `API ready on http://localhost:${API_PORT}`);
 
@@ -137,13 +146,11 @@ async function main() {
   await waitFor('site', `http://localhost:${SITE_PORT}/health`, 60_000);
   log('up', `Site ready on http://localhost:${SITE_PORT}`);
 
-  if (LOCAL_ONLY) return banner(`http://localhost:${SITE_PORT}`);
-
-  log('up', 'Opening the Cloudflare link (first run downloads cloudflared)...');
-  const url = await startTunnel();
-  log('up', `Got ${url}, waiting for it to answer...`);
-  // New quick-tunnel hostnames take a few seconds to resolve; the link usually works even if this check is slow.
-  if (!(await ready(`${url}/health`, 60_000)) && !stopping) log('tunnel', 'Link not answering yet from this machine; give it a minute.');
+  if (!LOCAL_ONLY) {
+    // New quick-tunnel hostnames take a few seconds to resolve; the link usually works even if this check is slow.
+    log('up', 'Waiting for the Cloudflare link to answer...');
+    if (!(await ready(`${url}/health`, 60_000)) && !stopping) log('tunnel', 'Link not answering yet from this machine; give it a minute.');
+  }
   if (!stopping) banner(url);
 }
 

@@ -3,39 +3,65 @@
 // then the platform may create orders against the saved account ("vault_id"). Reuses the
 // KubePay PayPal client, so tokens, request ids and errors behave like the rest of the backend.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { prisma } from '@kubepay/db';
 import { platformCredentials } from '../packages/paypal/src/config.ts';
 import { paypalRequest } from '../packages/paypal/src/http.ts';
-import { centsToValue, CURRENCY } from '../packages/paypal/src/money.ts';
-import type { Account } from './accounts.ts';
+import { ACCOUNTS, type Account } from './accounts.ts';
 import { login, withSandboxPage } from './sandbox-balance.ts';
 
 export type PayPalLink = { paymentTokenId: string; customerId: string; email: string; linkedAt: string };
 
-// ---------- Saved links (one per customer), kept in paypal-interface/data/links.json ----------
+// ---------- Saved links (one per customer), kept in the KubePay database ----------
+// The database (paypal_links, keyed by the PayPal email) lets the API charge savings payments too.
+// Links made before that lived in data/links.json; they are copied over the first time they are read.
 
-const DATA_DIR = fileURLToPath(new URL('./data/', import.meta.url));
-const LINKS_FILE = `${DATA_DIR}links.json`;
+const LEGACY_FILE = fileURLToPath(new URL('./data/links.json', import.meta.url));
 
-async function readLinks(): Promise<Record<string, PayPalLink>> {
+async function legacyLink(username: string): Promise<PayPalLink | null> {
   try {
-    return JSON.parse(await readFile(LINKS_FILE, 'utf8'));
+    return (JSON.parse(await readFile(LEGACY_FILE, 'utf8')) as Record<string, PayPalLink>)[username] ?? null;
   } catch {
-    return {};
+    return null;
   }
 }
 
+async function forgetLegacyLink(username: string) {
+  try {
+    const links = JSON.parse(await readFile(LEGACY_FILE, 'utf8')) as Record<string, PayPalLink>;
+    if (!(username in links)) return;
+    delete links[username];
+    await writeFile(LEGACY_FILE, JSON.stringify(links, null, 2));
+  } catch {
+    // no old file: nothing to forget
+  }
+}
+
+const emailOf = (username: string) => {
+  const account = ACCOUNTS[username];
+  if (!account) throw new Error(`Unknown customer ${username}`);
+  return account.sandboxEmail.toLowerCase();
+};
+
 export async function getLink(username: string): Promise<PayPalLink | null> {
-  return (await readLinks())[username] ?? null;
+  const email = emailOf(username);
+  const row = await prisma.paypalLink.findUnique({ where: { email } });
+  if (row) return { paymentTokenId: row.paymentTokenId, customerId: row.customerId, email: row.email, linkedAt: row.linkedAt.toISOString() };
+  const legacy = await legacyLink(username);
+  if (legacy && legacy.email.toLowerCase() === email) await saveLink(username, legacy);
+  return legacy && legacy.email.toLowerCase() === email ? legacy : null;
 }
 
 async function saveLink(username: string, link: PayPalLink | null) {
-  const links = await readLinks();
-  if (link) links[username] = link;
-  else delete links[username];
-  await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(LINKS_FILE, JSON.stringify(links, null, 2));
+  const email = emailOf(username);
+  if (!link) {
+    await prisma.paypalLink.deleteMany({ where: { email } });
+    await forgetLegacyLink(username); // or the old file would bring it back
+    return;
+  }
+  const data = { username, paymentTokenId: link.paymentTokenId, customerId: link.customerId, linkedAt: new Date(link.linkedAt) };
+  await prisma.paypalLink.upsert({ where: { email }, create: { email, ...data }, update: data });
 }
 
 export const unlink = (username: string) => saveLink(username, null);
@@ -124,32 +150,5 @@ export async function autoLink(account: Account, siteUrl: string): Promise<PayPa
 }
 
 // ---------- Charging the saved account ----------
-
-/**
- * POST /v2/checkout/orders paid with the saved PayPal account (no popup). custom_id = vault id,
- * like the button flow. The request id makes a retry return the same order instead of paying twice.
- */
-export async function chargeSavedPayPal(input: {
-  paymentTokenId: string;
-  vaultId: string;
-  amountCents: number;
-  description: string;
-  requestId?: string; // one per payment: a top-up after a policy change needs its own
-}) {
-  const body = await paypalRequest(platformCredentials(), 'POST', '/v2/checkout/orders', {
-    requestId: input.requestId ?? `fund-saved-${input.vaultId}`,
-    body: {
-      intent: 'CAPTURE',
-      purchase_units: [
-        {
-          custom_id: input.vaultId,
-          description: input.description.slice(0, 127),
-          amount: { currency_code: CURRENCY, value: centsToValue(input.amountCents) },
-        },
-      ],
-      payment_source: { paypal: { vault_id: input.paymentTokenId } },
-    },
-  });
-  const capture = body.purchase_units?.[0]?.payments?.captures?.[0];
-  return { orderId: body.id as string, status: body.status as string, captureStatus: capture?.status as string | undefined };
-}
+// Lives in the KubePay PayPal package, so the API can take savings payments with the same code.
+export { chargeSavedPayPal } from '../packages/paypal/src/orders.ts';
