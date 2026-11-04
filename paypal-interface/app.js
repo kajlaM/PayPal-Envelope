@@ -341,7 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentUser = user;
     const status = document.getElementById('paypalLinkStatus');
     if (user.paypalLinked) {
-      status.innerHTML = `<span class="link-ok" title="Vaults are paid from this PayPal sandbox account">✓ PayPal connected</span>`;
+      status.innerHTML = `<span class="link-ok" title="Vaults are paid from this PayPal sandbox account">✓ Connected</span>`;
     } else if (user.paypalLinking) {
       status.innerHTML = `<span class="link-pending">Connecting your PayPal…</span>`;
     } else {
@@ -466,7 +466,10 @@ document.addEventListener('DOMContentLoaded', () => {
           ? `Saving ${usd(v.savingsPerPaymentCents ?? 0)} / ${EVERY[v.savingsEvery] ?? 'payment'} &bull; ${v.savingsPausedAt ? 'paused' : v.nextChargeAt ? `next ${new Date(v.nextChargeAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'paying in'}`
           : v.type === 'SAVINGS' ? `Saved &bull; ends ${expires}`
           : `Max ${usdDollars(rules.max_single_transaction ?? 0)} per payment &bull; ends ${expires}${watching}`}</span>
-        <button type="button" class="btn-ghost-sm vault-manage-btn">Manage</button>
+        <span class="vault-card-actions">
+          <button type="button" class="btn-ghost-sm vault-timeline-btn">Timeline</button>
+          <button type="button" class="btn-ghost-sm vault-manage-btn">Manage</button>
+        </span>
       </div>
     `;
     return el;
@@ -546,7 +549,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('vaultsContainer').addEventListener('click', (e) => {
     const card = e.target.closest('.vault-card-item');
-    if (card) openVaultDetail(card.dataset.vaultId);
+    if (!card) return;
+    if (e.target.closest('.vault-timeline-btn')) openVaultTimeline(card.dataset.vaultId);
+    else openVaultDetail(card.dataset.vaultId);
   });
   document.getElementById('vaultsContainer').addEventListener('keydown', (e) => {
     const card = e.target.closest('.vault-card-item');
@@ -1545,6 +1550,653 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // ---------- Vault calendar (Bryntum Calendar) ----------
+  // Every vault is its own calendar (colour + sidebar checkbox). Its life is an all-day bar from created
+  // to end; money in/out, purchases, approvals, blocks, requests and rule changes are events; upcoming
+  // savings payments and the agent's next check are shown ahead of time.
+
+  const calOverlay = document.getElementById('vaultCalendar');
+  const calHost = document.getElementById('vaultCalendarHost');
+  const calStatus = document.getElementById('vaultCalendarStatus');
+  const BRYNTUM = '/vendor/bryntum-calendar';
+  const VAULT_COLORS = ['#0070BA', '#003087', '#009CDE', '#00875A', '#7B61FF', '#00A3A3', '#C2185B', '#5E6B7A'];
+  const KIND_COLORS = { wait: '#E8A317', block: '#D9381E' };
+  let calendar = null;
+  let bryntumReady = null;
+  let calInfo = new Map(); // event id -> { vaultId, vaultName, color, title, detail, at, upcoming }
+
+  function loadStyle(href) {
+    return new Promise((resolve, reject) => {
+      const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href });
+      link.onload = resolve;
+      link.onerror = () => reject(new Error(`Could not load ${href}`));
+      document.head.append(link);
+    });
+  }
+
+  function loadBryntum() {
+    bryntumReady ??= Promise.all([
+      loadStyle(`${BRYNTUM}/calendar.css`),
+      loadStyle(`${BRYNTUM}/svalbard-light.css`),
+      loadStyle(`${BRYNTUM}/fontawesome/css/fontawesome.css`),
+      loadStyle(`${BRYNTUM}/fontawesome/css/solid.css`),
+      loadScript(`${BRYNTUM}/calendar.umd.js`),
+    ]).then(() => {
+      if (!window.bryntum?.calendar?.Calendar) throw new Error('Bryntum Calendar did not load.');
+      return window.bryntum.calendar;
+    }).catch((err) => { bryntumReady = null; throw err; });
+    return bryntumReady;
+  }
+
+  const addInterval = (date, every) => {
+    const d = new Date(date);
+    if (every === 'DAY') d.setDate(d.getDate() + 1);
+    else if (every === 'WEEK') d.setDate(d.getDate() + 7);
+    else d.setMonth(d.getMonth() + 1);
+    return d;
+  };
+
+  // Vaults (with details) -> Bryntum resources + events. Text is kept as plain text here and
+  // HTML-encoded where it is rendered.
+  function calendarData(vaults) {
+    const resources = [];
+    const events = [];
+    const info = new Map();
+    vaults.forEach((v, i) => {
+      const color = VAULT_COLORS[i % VAULT_COLORS.length];
+      resources.push({ id: v.id, name: v.name, eventColor: color });
+      // action: what dragging the event changes ('savings-next' | 'expiry'); every other event is fixed.
+      const add = (key, at, title, { detail = '', kind = 'done', allDay = false, end = null, upcoming = false, action = null } = {}) => {
+        if (!at) return;
+        const id = `${v.id}:${key}`;
+        const startDate = new Date(at);
+        // A moment (not a span): 30 minutes, but never past midnight, so it stays a dot on its own day.
+        const dayEnd = new Date(startDate); dayEnd.setHours(23, 59, 59, 0);
+        const endDate = end ? new Date(end) : new Date(Math.min(startDate.getTime() + 30 * 60_000, Math.max(dayEnd.getTime(), startDate.getTime() + 1000)));
+        if (!(endDate > startDate)) return;
+        events.push({
+          id, resourceId: v.id, name: title, startDate, endDate, allDay,
+          draggable: !!action, resizable: false,
+          eventColor: KIND_COLORS[kind], cls: [`cal-${kind}`, upcoming ? 'cal-upcoming' : '', action ? 'cal-movable' : ''].filter(Boolean).join(' '),
+        });
+        info.set(id, { vaultId: v.id, vaultName: v.name, color: KIND_COLORS[kind] ?? color, title, detail, at: startDate, upcoming, allDay, end: endDate, action, vault: v });
+      };
+
+      const closed = v.status === 'LIQUIDATED' || v.status === 'EXPIRED';
+      const kindName = { UTILITY: 'Bill payments', SAVINGS: 'Savings', SHOPPING: 'Shopping' }[v.type] ?? v.type;
+      add('life', v.createdAt, v.name, {
+        allDay: true,
+        end: closed && v.updatedAt && new Date(v.updatedAt) < new Date(v.expiresAt) ? v.updatedAt : v.expiresAt,
+        detail: `${kindName} vault · ${usd(v.budgetCents)} · ${statusPill(v)[0]}`,
+      });
+
+      for (const h of v.policyHistory ?? []) {
+        if (h.version > 1) add(`rules:${h.version}`, h.createdAt, `Rules changed (v${h.version})`, { detail: (h.sourceText ?? '').replace(/\s*Vault budget: \$[\d.]+\.$/, '') });
+      }
+      for (const r of v.fundRequests ?? []) {
+        add(`req:${r.id}`, r.createdAt, `Asked ${r.payerEmail}`, { detail: `PayPal money request for ${usd(r.amountCents)}${r.message ? ` · “${r.message}”` : ''}` });
+        if (r.status === 'CANCELLED') add(`req-x:${r.id}`, r.resolvedAt ?? r.createdAt, 'Request cancelled', { kind: 'block', detail: r.payerEmail });
+      }
+      for (const e of v.ledger ?? []) {
+        const amount = usd(e.amountCents);
+        const friend = e.type === 'FUND' && /^Paid by (\S+) \(PayPal money request\)/.exec(e.note ?? '')?.[1];
+        const title = friend ? `${amount} from ${friend}`
+          : e.type === 'FUND' && /^Savings payment/.test(e.note ?? '') ? `Saved ${amount}`
+          : e.type === 'FUND' ? `Funded ${amount}`
+          : e.type === 'SPEND' ? `Paid ${amount} · ${e.merchant?.name ?? 'shop'}`
+          : `Refund ${amount}`;
+        const kind = e.status === 'COMPLETED' ? 'done' : e.status === 'PENDING' ? 'wait' : 'block';
+        add(`ledger:${e.id}`, e.createdAt, title, {
+          kind,
+          detail: [e.status === 'COMPLETED' ? '' : e.status.toLowerCase(), e.type === 'SPEND' && e.paidVia === 'CHECKOUT' ? 'PayPal Checkout' : '', e.note ?? ''].filter(Boolean).join(' · '),
+        });
+      }
+      // The agent's blocked buys: one event per day ("Blocked 6 buys"), so busy days stay readable.
+      const blockedByDay = new Map();
+      for (const d of v.decisions ?? []) {
+        if (d.result !== 'BLOCK') continue;
+        const day = new Date(d.createdAt).toDateString();
+        if (!blockedByDay.has(day)) blockedByDay.set(day, []);
+        blockedByDay.get(day).push(d);
+      }
+      for (const [day, list] of blockedByDay) {
+        const first = list[0];
+        const req = first.requestJson ?? {};
+        const title = list.length === 1 ? `Blocked ${usdDollars(req.amount ?? 0)} · ${req.merchant ?? '?'}` : `Blocked ${list.length} buys`;
+        const detail = list.slice(0, 5).map((d) => `${usdDollars(d.requestJson?.amount ?? 0)} at ${d.requestJson?.merchant ?? '?'}: ${reasons(d.reasons)}`).join(' · ')
+          + (list.length > 5 ? ` · and ${list.length - 5} more` : '');
+        add(`blocked:${day}`, first.createdAt, title, { kind: 'block', detail });
+      }
+      for (const d of v.decisions ?? []) {
+        if (d.result === 'BLOCK') continue;
+        const req = d.requestJson ?? {};
+        const what = `${usdDollars(req.amount ?? 0)} · ${req.merchant ?? '?'}`;
+        const pending = d.result === 'NEEDS_HUMAN' && !d.resolvedBy;
+        const [title, kind] = d.resolvedBy === 'REJECTED_BY_HUMAN' ? [`You rejected ${what}`, 'block']
+          : d.resolvedBy === 'CANCELLED_POLICY_CHANGED' ? [`Cancelled ${what}`, 'block']
+          : pending ? [`Needs approval: ${what}`, 'wait']
+          : [null];
+        if (title) add(`dec:${d.id}`, d.createdAt, title, { kind, detail: [reasons(d.reasons), req.reason ?? ''].filter(Boolean).join(' · ') });
+      }
+      for (const p of v.proposals ?? []) {
+        if (p.status === 'OPEN') add(`prop:${p.id}`, p.createdAt, 'Options ready: pick one', { kind: 'wait', detail: p.summary ?? '' });
+      }
+      if (closed && v.updatedAt) add('closed', v.updatedAt, v.status === 'LIQUIDATED' ? 'Vault closed' : 'Vault expired', {});
+
+      // Ahead of time
+      const sv = v.savings;
+      if (v.status === 'SAVING' && sv && !sv.pausedAt && v.nextChargeAt) {
+        let left = v.budgetCents - v.balanceCents;
+        let at = new Date(v.nextChargeAt);
+        for (let n = sv.paymentsMade + 1; left > 0 && n <= sv.paymentsTotal && n <= sv.paymentsMade + 60; n++) {
+          const cents = Math.min(sv.perPaymentCents, left);
+          const first = n === sv.paymentsMade + 1;
+          add(`save:${n}`, at, `Saving ${usd(cents)}`, {
+            upcoming: true,
+            action: first ? 'savings-next' : null,
+            detail: `Payment ${n} of ${sv.paymentsTotal}, from your PayPal${first ? '. Drag it to another day to move it (the later payments move with it).' : ''}`,
+          });
+          left -= cents;
+          at = addInterval(at, sv.every);
+        }
+      }
+      if (v.status === 'ACTIVE' && v.nextAgentRunAt) add('agent-next', v.nextAgentRunAt, 'Agent checks again', { upcoming: true, detail: 'The AI agent looks for products again' });
+      const movableEnd = v.status === 'ACTIVE' || v.status === 'SAVING';
+      if (!closed) {
+        add('ends', v.expiresAt, 'Vault ends', {
+          upcoming: true,
+          action: movableEnd ? 'expiry' : null,
+          detail: `Money left in the vault comes back to your PayPal${movableEnd ? '. Drag it to another day to end the vault earlier or later.' : ''}`,
+        });
+      }
+    });
+    return { resources, events, info };
+  }
+
+  function calTipHtml(i) {
+    const enc = escapeHtml;
+    const time = i.allDay
+      ? `${i.at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${i.end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      : i.at.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `<div class="cal-tip">
+      <div class="cal-tip-vault"><span class="cal-tip-dot" style="background:${i.color}"></span>${enc(i.vaultName)}${i.upcoming ? '<span class="cal-tip-badge">Upcoming</span>' : ''}</div>
+      <div class="cal-tip-title">${enc(i.title)}</div>
+      <div class="cal-tip-time">${enc(time)}</div>
+      ${i.detail ? `<div class="cal-tip-detail">${enc(i.detail)}</div>` : ''}
+    </div>`;
+  }
+
+  // Password confirmation as a Bryntum Popup. `save(password)` does the change; an error keeps the popup
+  // open with the message. Resolves true when saved, false when cancelled.
+  function confirmWithPassword({ title, html, okText, save }) {
+    const { Popup } = window.bryntum.calendar;
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+      const popup = new Popup({
+        title,
+        modal: true,
+        centered: true,
+        closable: true,
+        closeAction: 'destroy',
+        width: 420,
+        cls: 'cal-confirm',
+        items: {
+          info: { type: 'widget', cls: 'cal-confirm-info', html },
+          password: { type: 'passwordfield', label: 'Password', placeholder: 'Your password' },
+          error: { type: 'widget', cls: 'cal-confirm-error', html: '' },
+        },
+        bbar: [
+          { type: 'button', ref: 'cancelButton', text: 'Cancel', rendition: 'text', onClick: () => popup.close() },
+          { type: 'button', ref: 'okButton', text: okText, rendition: 'filled', onClick: () => submit() },
+        ],
+        listeners: { hide: () => settle(false) },
+      });
+      const { password, error, okButton } = popup.widgetMap;
+      async function submit() {
+        if (okButton.disabled) return;
+        if (!password.value) { error.html = 'Enter your password.'; return; }
+        okButton.disabled = true;
+        okButton.text = 'Saving…';
+        error.html = '';
+        try {
+          await save(password.value);
+          settle(true);
+          popup.close();
+        } catch (err) {
+          error.html = escapeHtml(err.message);
+          okButton.disabled = false;
+          okButton.text = okText;
+        }
+      }
+      popup.element.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+      popup.show();
+      password.focus();
+    });
+  }
+
+  const dayText = (d) => new Date(d).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+  // A movable event was dropped on a new date: confirm with the password and save it, or snap it back.
+  async function onCalendarDrop({ eventRecord, newStartDate }) {
+    const i = calInfo.get(eventRecord.id);
+    if (!i?.action) return false;
+    if (newStartDate.getTime() === i.at.getTime()) return true;
+    const { Toast } = window.bryntum.calendar;
+    if (newStartDate.getTime() < Date.now() + 5 * 60_000) {
+      Toast.show('Pick a date in the future.');
+      return false;
+    }
+    const v = i.vault;
+    const id = encodeURIComponent(v.id);
+    const vaultName = `<div class="cal-confirm-vault">${escapeHtml(v.name)}</div>`;
+    const change = (label) => `<div class="cal-confirm-change"><span>${label}</span><span><s>${dayText(i.at)}</s></span><strong>${dayText(newStartDate)}</strong></div>`;
+    const ok = i.action === 'savings-next'
+      ? await confirmWithPassword({
+        title: 'Move savings payment',
+        okText: 'Move payment',
+        html: `${vaultName}${change(`Next payment (${escapeHtml(i.title.replace(/^Saving /, ''))})`)}
+          <p class="cal-confirm-note">The payments after it keep their ${{ DAY: 'daily', WEEK: 'weekly', MONTH: 'monthly' }[v.savings.every] ?? ''} rhythm from the new date.</p>`,
+        save: (password) => request(`/me/vaults/${id}/savings/next`, { at: newStartDate.toISOString(), password }),
+      })
+      : await confirmWithPassword({
+        title: 'Change when the vault ends',
+        okText: newStartDate > i.at ? 'Extend vault' : 'End earlier',
+        html: `${vaultName}${change('Vault ends')}
+          <p class="cal-confirm-note">${newStartDate > i.at ? 'The money stays locked and the agent keeps its rules until the new date.' : 'The vault closes sooner.'} Leftover money comes back to your PayPal when it ends.</p>`,
+        save: (password) => request(`/me/vaults/${id}/expiry`, { expiresAt: newStartDate.toISOString(), password }),
+      });
+    if (ok) {
+      Toast.show(i.action === 'savings-next' ? 'Savings payment moved.' : 'Vault end date changed.');
+      // Recompute (e.g. the later savings payments, the vault's bar) once Bryntum finished the drop.
+      setTimeout(() => { refreshVaultCalendar().catch(() => {}); loadVaults(); }, 0);
+    }
+    return ok;
+  }
+
+  async function loadCalendarVaults() {
+    const list = await request('/me/vaults');
+    return Promise.all(list.map((v) => request(`/me/vaults/${encodeURIComponent(v.id)}`).catch(() => v)));
+  }
+
+  async function refreshVaultCalendar() {
+    const [{ Calendar }, vaults] = await Promise.all([loadBryntum(), loadCalendarVaults()]);
+    const { resources, events, info } = calendarData(vaults);
+    calInfo = info;
+    if (!calendar) {
+      calendar = new Calendar({
+        appendTo: calHost,
+        date: new Date(),
+        mode: 'month',
+        autoCreate: false,
+        enableDeleteKey: false, // events mirror the vaults: nothing is deleted from here
+        modes: { agenda: null, month: { showWeekColumn: false, showWeekNumber: false, autoRowHeight: true } },
+        resources,
+        events,
+        features: {
+          eventEdit: false,
+          // Only the next savings payment and the vault's end can be dragged (see calendarData).
+          drag: { creatable: false, resizable: false },
+          eventMenu: false,
+          scheduleMenu: false,
+          eventCopyPaste: false,
+          eventTooltip: {
+            align: 'l-r',
+            tooltip: { tools: { delete: false } },
+            renderer: ({ eventRecord }) => {
+              const i = calInfo.get(eventRecord.id);
+              return i ? calTipHtml(i) : escapeHtml(eventRecord.name);
+            },
+          },
+        },
+        listeners: {
+          beforeDragMoveEnd: onCalendarDrop,
+        },
+      });
+      calendar.eventStore.on('beforeRemove', ({ removingAll }) => (removingAll ? undefined : false));
+    } else {
+      calendar.resourceStore.data = resources;
+      calendar.eventStore.data = events;
+    }
+    calStatus.textContent = vaults.length ? '' : 'No vaults yet: create one to fill your calendar.';
+  }
+
+  async function openVaultCalendar() {
+    calOverlay.classList.remove('hidden');
+    document.body.classList.add('cal-open');
+    calStatus.textContent = calendar ? '' : 'Loading calendar…';
+    try {
+      await refreshVaultCalendar();
+    } catch (err) {
+      calStatus.textContent = `Could not load the calendar: ${err.message}`;
+    }
+  }
+
+  function closeVaultCalendar() {
+    calOverlay.classList.add('hidden');
+    document.body.classList.remove('cal-open');
+    calendar?.features.eventTooltip?.tooltip?.hide?.();
+  }
+
+  document.getElementById('vaultCalendarBtn').addEventListener('click', openVaultCalendar);
+  document.getElementById('closeVaultCalendarBtn').addEventListener('click', closeVaultCalendar);
+  calOverlay.addEventListener('click', (e) => { if (e.target === calOverlay) closeVaultCalendar(); });
+  document.addEventListener('keydown', (e) => {
+    // First Escape closes an open event tooltip (Bryntum does that), the next one closes the calendar.
+    if (e.key === 'Escape' && !calOverlay.classList.contains('hidden') && !calendar?.features.eventTooltip?.tooltip?.isVisible) closeVaultCalendar();
+  });
+
+  // ---------- Vault timeline (Bryntum Scheduler) ----------
+  // One vault on a time axis, in lanes: the vault's life, money in/out, what the AI agent did, and what
+  // you did. Fills live as the agent works. Drag the next savings payment, the vault's end or the
+  // agent's next check to move them; click anything for the details.
+
+  const tlOverlay = document.getElementById('vaultTimeline');
+  const tlHost = document.getElementById('vaultTimelineHost');
+  const tlDetails = document.getElementById('tlDetails');
+  const tlStatus = document.getElementById('tlStatus');
+  const TL_LANES = {
+    vault: { name: 'Vault', icon: 'fa fa-flag-checkered', color: '#003087' },
+    money: { name: 'Money', icon: 'fa fa-wallet', color: '#0070BA' },
+    agent: { name: 'AI agent', icon: 'fa fa-robot', color: '#009CDE' },
+    you: { name: 'You', icon: 'fa fa-user-check', color: '#00875A' },
+  };
+  const TL_KIND = { done: null, wait: '#E8A317', block: '#D9381E', future: '#9AA5B1' };
+  let timeline = null;
+  let tlVaultId = null;
+  let tlInfo = new Map();
+  let tlRefreshTimer;
+
+  // The vault (with details) -> lanes + events for the Scheduler.
+  function timelineData(v) {
+    const events = [];
+    const info = new Map();
+    const closed = v.status === 'LIQUIDATED' || v.status === 'EXPIRED';
+    const lifeEnd = new Date(closed && v.updatedAt && new Date(v.updatedAt) < new Date(v.expiresAt) ? v.updatedAt : v.expiresAt);
+    const start = new Date(v.createdAt);
+    const add = (lane, key, at, title, { detail = '', kind = 'done', end = null, action = null, icon = '', amount = '' } = {}) => {
+      if (!at) return;
+      const id = `${lane}:${key}`;
+      const startDate = new Date(at);
+      const endDate = end ? new Date(end) : startDate; // a moment is a milestone (◆ with its label)
+      events.push({
+        id, resourceId: lane, name: title, startDate, endDate,
+        eventColor: TL_KIND[kind] ?? TL_LANES[lane].color,
+        iconCls: icon, draggable: !!action, resizable: false,
+        cls: [`tl-${kind}`, action ? 'tl-movable' : ''].filter(Boolean).join(' '),
+      });
+      info.set(id, { lane, title, detail, at: startDate, end: end ? endDate : null, kind, action, amount });
+    };
+
+    // Vault lane: its life, and its end (movable while open)
+    add('vault', 'life', start, `${v.name} · ${usd(v.budgetCents)}`, {
+      end: lifeEnd, icon: 'fa fa-vault',
+      detail: `${{ UTILITY: 'Bill payments', SAVINGS: 'Savings', SHOPPING: 'Shopping' }[v.type] ?? v.type} vault · ${statusPill(v)[0]} · ${usd(v.balanceCents)} in it now`,
+    });
+    for (const h of v.policyHistory ?? []) {
+      if (h.version > 1) add('you', `rules:${h.version}`, h.createdAt, `Rules v${h.version}`, { icon: 'fa fa-pen', detail: (h.sourceText ?? '').replace(/\s*Vault budget: \$[\d.]+\.$/, '') || 'You changed the rules or the end date.' });
+    }
+    if (closed && v.updatedAt) add('vault', 'closed', v.updatedAt, v.status === 'LIQUIDATED' ? 'Closed' : 'Expired', { icon: 'fa fa-lock', detail: 'Leftover money went back to your PayPal.' });
+    const openVault = v.status === 'ACTIVE' || v.status === 'SAVING';
+    if (!closed) {
+      add('vault', 'ends', v.expiresAt, 'Ends', {
+        kind: 'future', icon: 'fa fa-hourglass-half', action: openVault ? 'expiry' : null,
+        detail: `Money left in the vault comes back to your PayPal.${openVault ? ' Drag to end the vault earlier or later (needs your password).' : ''}`,
+      });
+    }
+
+    // Money lane
+    for (const e of v.ledger ?? []) {
+      const amount = usd(e.amountCents);
+      const friend = e.type === 'FUND' && /^Paid by (\S+) \(PayPal money request\)/.exec(e.note ?? '')?.[1];
+      const title = friend ? `+${amount} from ${friend}`
+        : e.type === 'FUND' ? `+${amount}`
+        : e.type === 'SPEND' ? `−${amount} ${e.merchant?.name ?? 'shop'}`
+        : `↩ ${amount}`;
+      const what = friend ? 'Paid by a friend (PayPal money request)'
+        : e.type === 'FUND' && /^Savings payment/.test(e.note ?? '') ? 'Savings payment from your PayPal'
+        : e.type === 'FUND' ? 'Added from your PayPal'
+        : e.type === 'SPEND' ? `Paid to ${e.merchant?.name ?? 'the shop'}${e.paidVia === 'CHECKOUT' ? ' with PayPal Checkout (buyer protection)' : ''}`
+        : 'Refunded to your PayPal';
+      add('money', `ledger:${e.id}`, e.createdAt, title, {
+        kind: e.status === 'COMPLETED' ? 'done' : e.status === 'PENDING' ? 'wait' : 'block',
+        icon: e.type === 'FUND' ? 'fa fa-piggy-bank' : e.type === 'SPEND' ? 'fa fa-sack-dollar' : 'fa fa-rotate-left',
+        detail: [what, e.status === 'COMPLETED' ? '' : e.status.toLowerCase(), e.note && e.type === 'SPEND' ? e.note : ''].filter(Boolean).join(' · '),
+      });
+    }
+    const sv = v.savings;
+    if (v.status === 'SAVING' && sv && !sv.pausedAt && v.nextChargeAt) {
+      let left = v.budgetCents - v.balanceCents;
+      let at = new Date(v.nextChargeAt);
+      for (let n = sv.paymentsMade + 1; left > 0 && n <= sv.paymentsTotal && n <= sv.paymentsMade + 60; n++) {
+        const cents = Math.min(sv.perPaymentCents, left);
+        const first = n === sv.paymentsMade + 1;
+        add('money', `save:${n}`, at, `+${usd(cents)}`, {
+          kind: 'future', icon: 'fa fa-piggy-bank', action: first ? 'savings-next' : null,
+          detail: `Savings payment ${n} of ${sv.paymentsTotal}, from your PayPal.${first ? ' Drag to move it (the later payments move with it; needs your password).' : ''}`,
+        });
+        left -= cents;
+        at = addInterval(at, sv.every);
+      }
+    }
+
+    // Agent lane (types without an agent skip it)
+    if (v.type !== 'SAVINGS') {
+      for (const d of v.decisions ?? []) {
+        const req = d.requestJson ?? {};
+        const what = `${usdDollars(req.amount ?? 0)} ${req.merchant ?? ''}`.trim();
+        const pending = d.result === 'NEEDS_HUMAN' && !d.resolvedBy;
+        const [title, kind, icon] = d.result === 'APPROVE' ? [`Bought ${what}`, 'done', 'fa fa-cart-shopping']
+          : d.result === 'BLOCK' ? [`Blocked ${what}`, 'block', 'fa fa-ban']
+          : pending ? [`Asks you: ${what}`, 'wait', 'fa fa-hand']
+          : [`Asked you: ${what}`, 'done', 'fa fa-hand'];
+        add('agent', `dec:${d.id}`, d.createdAt, title, { kind, icon, detail: [req.reason ?? '', d.reasons?.length ? `Why: ${reasons(d.reasons)}` : ''].filter(Boolean).join(' · ') });
+        // Decisions keep no answer time, so your answer is shown at the moment the agent asked.
+        if (d.resolvedBy === 'APPROVED_BY_HUMAN' || d.resolvedBy === 'REJECTED_BY_HUMAN' || d.resolvedBy === 'CHOSEN_BY_OWNER') {
+          const yes = d.resolvedBy !== 'REJECTED_BY_HUMAN';
+          add('you', `res:${d.id}`, d.createdAt, `${d.resolvedBy === 'CHOSEN_BY_OWNER' ? 'Picked' : yes ? 'Approved' : 'Rejected'} ${what}`, {
+            kind: yes ? 'done' : 'block', icon: yes ? 'fa fa-thumbs-up' : 'fa fa-thumbs-down', detail: req.reason ?? '',
+          });
+        }
+      }
+      for (const pr of v.proposals ?? []) {
+        add('agent', `prop:${pr.id}`, pr.createdAt, `${pr.options?.length ?? 3} options`, {
+          kind: pr.status === 'OPEN' ? 'wait' : 'done', icon: 'fa fa-list-check',
+          detail: [pr.summary ?? '', (pr.options ?? []).map((o) => `${o.title} (${usdDollars(o.verified_price ?? o.price)})`).join(' · ')].filter(Boolean).join(' — '),
+        });
+      }
+      for (const [n, step] of (agentSteps[v.id] ?? []).entries()) {
+        add('agent', `live:${n}`, step.at, stepText(step).replace(/^(✅|✋|⛔|👉)\s*/u, '').replace(/<[^>]+>/g, ''), { icon: 'fa fa-bolt', detail: 'Live step from this session.' });
+      }
+      if (v.lastAgentRunAt) add('agent', 'last', v.lastAgentRunAt, `Last run: ${OUTCOME_TEXT[v.lastAgentOutcome] ?? v.lastAgentOutcome ?? 'done'}`, { icon: 'fa fa-robot', detail: 'When the agent last looked.' });
+      if (v.status === 'ACTIVE' && v.nextAgentRunAt) {
+        add('agent', 'next', v.nextAgentRunAt, 'Next check', {
+          kind: 'future', icon: 'fa fa-clock', action: 'agent-next',
+          detail: 'When the agent looks again. Drag to make it look sooner or later.',
+        });
+      }
+    }
+
+    // You lane: friend requests
+    for (const r of v.fundRequests ?? []) {
+      add('you', `req:${r.id}`, r.createdAt, `Asked ${r.payerEmail}`, { icon: 'fa fa-envelope', detail: `PayPal money request for ${usd(r.amountCents)}${r.message ? ` · “${r.message}”` : ''}` });
+    }
+
+    const lanes = Object.entries(TL_LANES).filter(([id]) => id !== 'agent' || v.type !== 'SAVINGS').map(([id, l]) => ({ id, ...l }));
+    const last = events.reduce((m, e) => (e.endDate > m ? e.endDate : m), lifeEnd);
+    return { lanes, events, info, start, end: last };
+  }
+
+  // Zoom that fits the vault's life: hours for a short one, days for weeks, weeks for months.
+  function timelinePreset(start, end) {
+    const days = (end - start) / 86_400_000;
+    return days <= 2 ? 'hourAndDay' : days <= 60 ? 'weekAndDay' : 'weekAndMonth';
+  }
+
+  function tlDetailsHtml(i) {
+    const enc = escapeHtml;
+    const when = (d) => d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `<div class="tl-d-lane"><span class="cal-tip-dot" style="background:${TL_KIND[i.kind] ?? TL_LANES[i.lane].color}"></span>${enc(TL_LANES[i.lane].name)}${i.kind === 'future' ? '<span class="cal-tip-badge">Upcoming</span>' : ''}</div>
+      <div class="tl-d-title">${enc(i.title)}</div>
+      <div class="tl-d-time">${enc(when(i.at))}${i.end ? ` → ${enc(when(i.end))}` : ''}</div>
+      ${i.detail ? `<p class="tl-d-detail">${enc(i.detail)}</p>` : ''}
+      ${i.action ? '<p class="tl-d-hint"><i class="fa fa-arrows-left-right"></i> Drag it on the timeline to move it.</p>' : ''}`;
+  }
+  const tlDetailsEmpty = '<p class="tl-d-empty">Click anything on the timeline to see what happened.</p>';
+
+  // A movable item was dropped at a new time: save it (with the password where money is involved).
+  async function onTimelineDrop(eventRecord, newStart) {
+    const i = tlInfo.get(eventRecord.id);
+    const v = detailVaultForTimeline;
+    if (!i?.action || !v) return false;
+    if (Math.abs(newStart - i.at) < 60_000) return true;
+    const { Toast } = window.bryntum.calendar;
+    if (newStart.getTime() < Date.now() + 5 * 60_000) { Toast.show('Pick a time in the future.'); return false; }
+    const id = encodeURIComponent(v.id);
+    if (i.action === 'agent-next') {
+      try {
+        await request(`/me/vaults/${id}/agent/next`, { at: newStart.toISOString() });
+        Toast.show(`The agent looks again ${dayText(newStart)}.`);
+        return true;
+      } catch (err) {
+        Toast.show(err.message);
+        return false;
+      }
+    }
+    // Same confirmation as the calendar.
+    const calLike = { at: i.at, title: i.title, vault: v, action: i.action };
+    const vaultName = `<div class="cal-confirm-vault">${escapeHtml(v.name)}</div>`;
+    const change = (label) => `<div class="cal-confirm-change"><span>${label}</span><span><s>${dayText(calLike.at)}</s></span><strong>${dayText(newStart)}</strong></div>`;
+    const ok = i.action === 'savings-next'
+      ? await confirmWithPassword({
+        title: 'Move savings payment', okText: 'Move payment',
+        html: `${vaultName}${change(`Next payment (${escapeHtml(i.title.replace(/^\+/, ''))})`)}<p class="cal-confirm-note">The payments after it keep their rhythm from the new date.</p>`,
+        save: (password) => request(`/me/vaults/${id}/savings/next`, { at: newStart.toISOString(), password }),
+      })
+      : await confirmWithPassword({
+        title: 'Change when the vault ends', okText: newStart > i.at ? 'Extend vault' : 'End earlier',
+        html: `${vaultName}${change('Vault ends')}<p class="cal-confirm-note">Leftover money comes back to your PayPal when it ends.</p>`,
+        save: (password) => request(`/me/vaults/${id}/expiry`, { expiresAt: newStart.toISOString(), password }),
+      });
+    if (ok) Toast.show(i.action === 'savings-next' ? 'Savings payment moved.' : 'Vault end date changed.');
+    return ok;
+  }
+
+  let detailVaultForTimeline = null;
+
+  async function renderTimeline({ fit = false } = {}) {
+    const id = tlVaultId;
+    if (!id) return;
+    const [{ Scheduler }, v] = await Promise.all([loadBryntum(), request(`/me/vaults/${encodeURIComponent(id)}`)]);
+    if (id !== tlVaultId) return;
+    detailVaultForTimeline = v;
+    const { lanes, events, info, start, end } = timelineData(v);
+    tlInfo = info;
+    document.getElementById('tlTitle').textContent = v.name;
+    document.getElementById('tlSub').textContent = `${statusPill(v)[0]} · ${usd(v.balanceCents)} of ${usd(v.budgetCents)} · ${when(v.createdAt)} → ${when(v.expiresAt)}`;
+    document.getElementById('tlLive').classList.toggle('hidden', v.status !== 'ACTIVE' && v.status !== 'SAVING');
+    const pad = Math.max((end - start) * 0.06, 3 * 3_600_000);
+    const range = { startDate: new Date(start.getTime() - pad), endDate: new Date(end.getTime() + pad) };
+    if (!timeline || fit) {
+      timeline?.destroy();
+      timeline = new Scheduler({
+        appendTo: tlHost,
+        ...range,
+        viewPreset: timelinePreset(range.startDate, range.endDate),
+        rowHeight: 46,
+        barMargin: 6,
+        eventStyle: 'rounded',
+        // Moments are milestones whose labels take up room, so a burst of agent activity stacks
+        // into readable rows instead of overlapping.
+        milestoneLayoutMode: 'estimate',
+        milestoneCharWidth: 7,
+        milestoneTextPosition: 'always-outside',
+        enableDeleteKey: false,
+        columns: [{
+          text: '', field: 'name', width: 140, htmlEncode: false, sortable: false,
+          renderer: ({ record }) => `<span class="tl-lane"><i class="${record.icon}" style="color:${record.color}"></i>${escapeHtml(record.name)}</span>`,
+        }],
+        resources: lanes,
+        events,
+        features: {
+          eventEdit: false,
+          eventMenu: false,
+          scheduleMenu: false,
+          cellMenu: false,
+          eventCopyPaste: false,
+          eventResize: false,
+          eventDragCreate: false,
+          sort: false,
+          timeRanges: { showCurrentTimeLine: true },
+          eventDrag: { constrainDragToResource: true, showTooltip: true },
+          eventTooltip: {
+            template: ({ eventRecord }) => {
+              const i = tlInfo.get(eventRecord.id);
+              return i ? `<b>${escapeHtml(i.title)}</b><br><span class="muted">${escapeHtml(dayText(i.at))}</span>` : escapeHtml(eventRecord.name);
+            },
+          },
+        },
+        eventRenderer: ({ eventRecord }) => escapeHtml(eventRecord.name),
+        listeners: {
+          eventClick: ({ eventRecord }) => {
+            const i = tlInfo.get(eventRecord.id);
+            tlDetails.innerHTML = i ? tlDetailsHtml(i) : tlDetailsEmpty;
+          },
+          beforeEventDropFinalize: ({ context }) => {
+            context.async = true;
+            onTimelineDrop(context.eventRecord, context.startDate)
+              .catch(() => false)
+              .then((ok) => {
+                context.finalize(ok);
+                if (ok) setTimeout(() => { refreshTimelineSoon(); loadVaults(); }, 0);
+              });
+          },
+        },
+      });
+      timeline.eventStore.on('beforeRemove', ({ removingAll }) => (removingAll ? undefined : false));
+      // Open at the vault's start: most of the action is right after it is created; the future is to the right.
+      timeline.scrollToDate(range.startDate, { block: 'start', animate: false }).catch(() => {});
+    } else {
+      timeline.resourceStore.data = lanes;
+      timeline.eventStore.data = events;
+      if (range.endDate > timeline.endDate) timeline.setTimeSpan(timeline.startDate, range.endDate);
+    }
+  }
+
+  function refreshTimelineSoon() {
+    if (!tlVaultId) return;
+    clearTimeout(tlRefreshTimer);
+    tlRefreshTimer = setTimeout(() => renderTimeline().catch(() => {}), 400);
+  }
+
+  async function openVaultTimeline(vaultId) {
+    tlVaultId = vaultId;
+    tlOverlay.classList.remove('hidden');
+    document.body.classList.add('cal-open');
+    tlDetails.innerHTML = tlDetailsEmpty;
+    tlStatus.textContent = 'Loading timeline…';
+    try {
+      await renderTimeline({ fit: true });
+      tlStatus.textContent = '';
+    } catch (err) {
+      tlStatus.textContent = `Could not load the timeline: ${err.message}`;
+    }
+  }
+
+  function closeVaultTimeline() {
+    tlVaultId = null;
+    tlOverlay.classList.add('hidden');
+    document.body.classList.remove('cal-open');
+    timeline?.destroy();
+    timeline = null;
+  }
+
+  document.getElementById('closeVaultTimelineBtn').addEventListener('click', closeVaultTimeline);
+  tlOverlay.addEventListener('click', (e) => { if (e.target === tlOverlay) closeVaultTimeline(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && tlVaultId && !document.querySelector('.b-popup.cal-confirm')) closeVaultTimeline();
+  });
+
   // ---------- Live updates from KubePay (Socket.IO) ----------
 
   let liveStarted = false;
@@ -1557,6 +2209,8 @@ document.addEventListener('DOMContentLoaded', () => {
       loadVaults();
       refreshAccount();
       renderVaultDetail();
+      if (calendar && !calOverlay.classList.contains('hidden')) refreshVaultCalendar().catch(() => {});
+      refreshTimelineSoon();
     }, 300);
   }
 
@@ -1584,6 +2238,7 @@ document.addEventListener('DOMContentLoaded', () => {
       socket.on('proposal:created', refreshSoon);
       socket.on('agent:step', (step) => {
         (agentSteps[step.vaultId] ??= []).push({ ...step, at: Date.now() });
+        if (step.vaultId === tlVaultId) refreshTimelineSoon();
         if (step.vaultId === detailId) {
           const list = document.getElementById('vdSteps');
           if (list) list.insertAdjacentHTML('beforeend', logRow(step, Date.now()));

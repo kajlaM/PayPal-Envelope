@@ -25,5 +25,8 @@
     "@types/node": "^22.15.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@bryntum/calendar-trial": "7.3.7"
   }
 }

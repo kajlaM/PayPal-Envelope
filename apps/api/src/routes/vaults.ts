@@ -4,7 +4,7 @@ import { changeVaultPolicy, LedgerError, prisma, startFunding, startLiquidation 
 import { createOrder, getSubscription } from '@kubepay/paypal';
 import {
   compilePolicy, CreateProposalSchema, evaluate, itemProgress, listItems, PolicyCompileError, PolicySchema, ProposalOptionSchema,
-  savingsSchedule, SpendRequestSchema, toCents, type Policy, type SpendRequest,
+  addInterval, SAVINGS_MAX_DAYS, savingsSchedule, SpendRequestSchema, toCents, type Policy, type SpendRequest,
 } from '@kubepay/policy';
 import { emit } from '../events.ts';
 import { HttpError, requireInternalKey } from '../http.ts';
@@ -15,7 +15,7 @@ import { cancelFundRequest, createFundRequest, syncFundRequests } from '../servi
 import { decideAndSpend, executeSpend } from '../services/spend.ts';
 import { payOutLiquidation, syncPendingPayouts } from '../services/payouts.ts';
 import { buildEngineContext, itemSpentCents } from '../services/policy-context.ts';
-import { chargeSavingsPayment, pauseSavings, resumeSavings, savingsSummary } from '../services/savings.ts';
+import { chargeSavingsPayment, pauseSavings, rescheduleSavings, resumeSavings, savingsSummary } from '../services/savings.ts';
 
 export const vaultsRouter = Router();
 
@@ -450,6 +450,62 @@ vaultsRouter.post('/:id/proposals/:proposalId/reject', async (req, res) => {
 // this right after creating the vault) or an early one ("pay now"). Scheduled ones run in the tick.
 vaultsRouter.post<{ id: string }>('/:id/savings/charge', requireInternalKey, async (req, res) => {
   res.json(await chargeSavingsPayment(req.params.id));
+});
+
+// Move the agent's next check (vault timeline drag). Nothing moves money, so no extra checks needed
+// beyond: the vault is active, the agent is watching it, and the time is before the vault ends.
+vaultsRouter.post('/:id/agent/next', async (req, res) => {
+  const { at } = z.object({ at: z.coerce.date() }).parse(req.body);
+  const { vault } = await loadVault(req.params.id);
+  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'The agent only works while the vault is active.' });
+  if (!vault.nextAgentRunAt) throw new HttpError(409, 'NOT_WATCHING', { message: 'The agent is not watching this vault. Tap Run now first.' });
+  if (!(at.getTime() > Date.now() + 60_000)) throw new HttpError(400, 'DATE_IN_PAST', { message: 'Pick a time from now on.' });
+  if (at >= vault.expiresAt) throw new HttpError(400, 'AFTER_VAULT_ENDS', { message: 'That is after the vault ends.' });
+  const updated = await prisma.vault.update({ where: { id: vault.id }, data: { nextAgentRunAt: at } });
+  emit('vault:updated', { vaultId: vault.id, nextAgentRunAt: at });
+  res.json({ nextAgentRunAt: updated.nextAgentRunAt });
+});
+
+// Move the next savings payment (vault calendar drag).
+vaultsRouter.post('/:id/savings/next', async (req, res) => {
+  const { at } = z.object({ at: z.coerce.date() }).parse(req.body);
+  res.json(await rescheduleSavings(req.params.id, at));
+});
+
+// Move the vault's end date (vault calendar drag). Only the end date changes: it is saved as the next
+// policy version (same rules otherwise), money and purchases waiting for approval are untouched.
+const MAX_VAULT_DAYS = 90;
+vaultsRouter.post('/:id/expiry', async (req, res) => {
+  const { expiresAt } = z.object({ expiresAt: z.coerce.date() }).parse(req.body);
+  const { vault, policy } = await loadVault(req.params.id);
+  const now = new Date();
+  if (vault.status !== 'ACTIVE' && vault.status !== 'SAVING') {
+    throw new HttpError(409, 'VAULT_NOT_OPEN', { message: 'Only an open vault can get a new end date.' });
+  }
+  if (!(expiresAt.getTime() > now.getTime() + 3_600_000)) throw new HttpError(400, 'EXPIRY_IN_PAST', { message: 'The new end date must be at least an hour from now.' });
+  const saving = vault.savingsEvery !== null && vault.savingsPerPaymentCents !== null;
+  const maxDays = saving ? SAVINGS_MAX_DAYS : MAX_VAULT_DAYS;
+  if (expiresAt.getTime() - now.getTime() > maxDays * 86_400_000) {
+    throw new HttpError(400, 'EXPIRY_TOO_FAR', { message: `A vault can end at most ${maxDays} days from now.` });
+  }
+  if (vault.status === 'SAVING' && saving && vault.nextChargeAt) {
+    const remaining = Math.ceil((vault.budgetCents - vault.balanceCents) / vault.savingsPerPaymentCents!);
+    const lastAt = addInterval(vault.nextChargeAt, vault.savingsEvery!, Math.max(0, remaining - 1));
+    if (expiresAt <= lastAt) {
+      throw new HttpError(409, 'EXPIRY_BEFORE_LAST_PAYMENT', { message: `The vault must last until the last savings payment (${lastAt.toDateString()}).` });
+    }
+  }
+  const next: Policy = { ...policy, rules: { ...policy.rules, expiry_timestamp: expiresAt.toISOString() } };
+  const latest = await prisma.policy.findFirst({ where: { vaultId: vault.id }, orderBy: { version: 'desc' } });
+  const [saved, updated] = await prisma.$transaction([
+    prisma.policy.create({
+      data: { vaultId: vault.id, version: (latest?.version ?? 0) + 1, policyJson: next, sourceText: latest?.sourceText ?? undefined },
+    }),
+    prisma.vault.update({ where: { id: vault.id }, data: { expiresAt } }),
+  ]);
+  emit('vault:updated', { vaultId: vault.id });
+  emit('policy:changed', { vaultId: vault.id, version: saved.version, changeCents: 0, cancelledApprovals: 0 });
+  res.json({ vault: updated, version: saved.version });
 });
 
 vaultsRouter.post('/:id/savings/pause', async (req, res) => {

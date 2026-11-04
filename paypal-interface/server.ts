@@ -8,6 +8,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import http, { type IncomingMessage } from 'node:http';
 import https from 'node:https';
 import type { Duplex } from 'node:stream';
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { completeFunding, failFunding, prisma, startFunding } from '@kubepay/db'; // also loads the repo-root .env
@@ -518,7 +520,11 @@ app.post('/me/vaults', async (req, res) => {
 async function createVault(account: Account, req: Request): Promise<Created> {
   const funding: FundingMethod = req.body?.funding ?? 'PAYPAL';
   if (!FUNDING_METHODS.includes(funding)) throw new HttpError(400, 'INVALID_FUNDING', { message: 'Pick how to fund the vault.' });
-  const plan = req.body?.policy?.savings;
+  const policy = req.body?.policy;
+  if (!policy || typeof policy !== 'object' || !policy.rules || !policy.vault_name || !(Number(policy.allocated_budget) > 0)) {
+    throw new HttpError(400, 'INVALID_POLICY', { message: 'Go back and let the AI write the rules first.' });
+  }
+  const plan = policy.savings;
   if (plan && funding !== 'PAYPAL') {
     throw new HttpError(400, 'SAVINGS_PAID_BY_OWNER', { message: 'A vault paid in over time is paid from your own PayPal.' });
   }
@@ -787,6 +793,27 @@ app.post('/me/vaults/:id/savings/pay-now', async (req, res) => {
   }
 });
 
+// Vault calendar drags. Both change when money moves or how long it stays locked, so they need the password.
+app.post('/me/vaults/:id/savings/next', async (req, res) => {
+  const account = loggedIn(req);
+  if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  const vault = await ownVault(account, req.params.id);
+  res.json(await kubepay('POST', `/api/vaults/${vault.id}/savings/next`, { at: req.body?.at }));
+});
+
+app.post('/me/vaults/:id/expiry', async (req, res) => {
+  const account = loggedIn(req);
+  if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  const vault = await ownVault(account, req.params.id);
+  res.json(await kubepay('POST', `/api/vaults/${vault.id}/expiry`, { expiresAt: req.body?.expiresAt }));
+});
+
+// Vault timeline drag: when the agent looks again (moves no money, so no password).
+app.post('/me/vaults/:id/agent/next', async (req, res) => {
+  const vault = await ownVault(loggedIn(req), req.params.id);
+  res.json(await kubepay('POST', `/api/vaults/${vault.id}/agent/next`, { at: req.body?.at }));
+});
+
 for (const action of ['pause', 'resume']) {
   app.post(`/me/vaults/:id/savings/${action}`, async (req, res) => {
     const vault = await ownVault(loggedIn(req), req.params.id);
@@ -1016,6 +1043,10 @@ for (const file of ['index.html', 'styles.css', 'app.js']) {
   app.get(file === 'index.html' ? ['/', '/index.html'] : `/${file}`, (_req, res) => res.sendFile(file, { root: dir }));
 }
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
+// Bryntum Calendar (trial build) for the vault calendar; the page loads it only when the calendar opens.
+const bryntumCalendar = dirname(createRequire(import.meta.url).resolve('@bryntum/calendar-trial/package.json'));
+app.use('/vendor/bryntum-calendar', express.static(bryntumCalendar, { index: false }));
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.code, ...err.extra });

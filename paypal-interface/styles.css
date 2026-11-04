@@ -3017,3 +3017,135 @@ body {
 .track-time { color: var(--pp-gray-500); font-size: 0.75rem; white-space: nowrap; line-height: 1.6; }
 .track-sub { grid-column: 2 / span 2; color: var(--pp-gray-500); font-size: 0.8rem; overflow-wrap: anywhere; }
 .vd-ask { display: flex; flex-direction: column; gap: 10px; }
+
+/* ---------- Vault calendar (Bryntum Calendar, Apple Calendar look in PayPal colours) ---------- */
+body.cal-open { overflow: hidden; }
+
+.cal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 12, 13, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.cal-overlay.hidden { display: none; }
+
+.cal-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(1280px, 100%);
+  height: min(860px, 100%);
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--pp-white);
+  box-shadow: 0 24px 64px rgba(0, 28, 100, 0.28);
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px 10px 22px;
+}
+.cal-title { font-size: 1.15rem; font-weight: 700; color: var(--pp-black); }
+.cal-status { flex: 1; color: var(--pp-gray-500); font-size: 0.85rem; }
+
+.cal-host { flex: 1; min-height: 0; display: flex; }
+.cal-host > .b-calendar { flex: 1; }
+
+/* Bryntum theme overrides, scoped to the vault calendar */
+.cal-host .b-calendar,
+.b-float-root .b-tooltip.b-eventtip {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', sans-serif;
+}
+.b-float-root { z-index: 1000; }
+
+/* Upcoming events: lighter, like tentative events in Apple Calendar */
+.cal-host .cal-upcoming { opacity: 0.6; }
+
+/* Event tooltip */
+.cal-tip { display: flex; flex-direction: column; gap: 4px; min-width: 220px; max-width: 300px; font-size: 0.85rem; }
+.cal-tip-vault { display: flex; align-items: center; gap: 6px; color: var(--pp-gray-500); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+.cal-tip-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.cal-tip-badge { margin-left: auto; padding: 1px 7px; border-radius: 999px; background: var(--pp-blue-light); color: var(--pp-blue-primary); text-transform: none; letter-spacing: 0; }
+.cal-tip-title { font-size: 1rem; font-weight: 700; color: var(--pp-navy-dark); overflow-wrap: anywhere; }
+.cal-tip-time { color: var(--pp-gray-700); }
+.cal-tip-detail { color: var(--pp-gray-500); overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .cal-overlay { padding: 0; }
+  .cal-sheet { border-radius: 0; height: 100%; }
+}
+/* Bryntum derives its colour shades at :root, so the PayPal blue is set there (only --b-* variables). */
+:root:root:not(.b-nothing) {
+  --b-primary: #0070BA;
+  --b-month-view-header-cell-weekend-color: var(--pp-gray-700);
+  --b-calendar-view-header-cell-weekend-color: var(--pp-gray-700);
+  --b-month-view-cell-weekend-color: var(--pp-gray-900);
+  --b-calendar-view-cell-weekend-color: var(--pp-gray-900);
+  --b-calendar-view-header-cell-non-working-day-color: var(--pp-gray-700);
+}
+
+/* Events you can drag (next savings payment, vault end) */
+.cal-host .cal-movable { cursor: grab; opacity: 1; }
+.cal-host .cal-movable .b-cal-event { outline: 1.5px dashed var(--pp-blue-primary); outline-offset: 1px; border-radius: 6px; }
+
+/* Password confirmation (Bryntum Popup) */
+.b-popup.cal-confirm { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', sans-serif; }
+.cal-confirm-vault { font-size: 0.75rem; font-weight: 600; color: var(--pp-gray-500); text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 6px; }
+.cal-confirm-change { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--pp-blue-light); color: var(--pp-navy-dark); }
+.cal-confirm-change > span:first-child { font-size: 0.8rem; color: var(--pp-gray-700); }
+.cal-confirm-change s { color: var(--pp-gray-500); }
+.cal-confirm-note { margin-top: 8px; font-size: 0.8rem; color: var(--pp-gray-500); }
+.cal-confirm-error { color: var(--pp-red); font-size: 0.8rem; min-height: 1em; }
+.b-popup.cal-confirm .cal-confirm-info { display: block; width: 100%; margin-bottom: 12px; }
+.b-popup.cal-confirm .cal-confirm-error { width: 100%; }
+
+/* ---------- Vault card: Timeline + Manage ---------- */
+/* Footer: status text on its own line, Timeline + Manage below it at the same spot on every card */
+.vault-footer-row { flex-wrap: wrap; gap: 10px; }
+.vault-footer-row .vault-policy-badge { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+.vault-card-actions { display: inline-flex; gap: 6px; flex: none; margin-left: auto; }
+
+/* ---------- Vault timeline (Bryntum Scheduler) ---------- */
+.tl-heading { display: flex; flex-direction: column; min-width: 0; }
+.tl-sub { color: var(--pp-gray-500); font-size: 0.8rem; }
+.tl-live { display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: var(--pp-blue-primary); }
+.tl-live.hidden { display: none; }
+.tl-body { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--pp-gray-200); }
+.tl-host { flex: 1; min-width: 0; display: flex; }
+.tl-host > .b-scheduler { flex: 1; }
+.tl-details {
+  flex: 0 0 280px;
+  overflow-y: auto;
+  padding: 18px;
+  border-left: 1px solid var(--pp-gray-200);
+  background: #F7F9FC;
+  font-size: 0.85rem;
+}
+.tl-d-empty { color: var(--pp-gray-500); }
+.tl-d-lane { display: flex; align-items: center; gap: 6px; color: var(--pp-gray-500); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+.tl-d-title { margin-top: 6px; font-size: 1.05rem; font-weight: 700; color: var(--pp-navy-dark); overflow-wrap: anywhere; }
+.tl-d-time { margin-top: 2px; color: var(--pp-gray-700); }
+.tl-d-detail { margin-top: 10px; color: var(--pp-gray-700); line-height: 1.45; overflow-wrap: anywhere; }
+.tl-d-hint { margin-top: 12px; color: var(--pp-blue-primary); font-weight: 600; }
+
+.tl-host .b-scheduler { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', sans-serif; }
+.tl-lane { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; color: var(--pp-navy-dark); }
+.tl-lane i { width: 16px; text-align: center; }
+.tl-host .b-sch-event.tl-future { opacity: 0.8; }
+.tl-host .b-sch-event.tl-movable { cursor: grab; outline: 1.5px dashed var(--pp-blue-primary); outline-offset: 3px; border-radius: 8px; }
+.tl-host .b-milestone-wrap { --b-milestone-size: 16px; }
+.tl-host .b-milestone .b-sch-event-content > i { width: 20px; text-align: center; color: var(--b-primary); }
+.tl-host .b-milestone .b-sch-event-content > label { margin-inline-start: 4px; }
+.tl-host .b-milestone .b-sch-event-content > label { font-size: 0.82rem; font-weight: 600; }
+
+@media (max-width: 760px) {
+  .tl-body { flex-direction: column; }
+  .tl-details { flex: 0 0 auto; max-height: 30%; border-left: 0; border-top: 1px solid var(--pp-gray-200); }
+}

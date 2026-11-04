@@ -155,6 +155,26 @@ export async function resumeSavings(vaultId: string, now = new Date()) {
   emit('vault:updated', { vaultId });
 }
 
+/**
+ * The owner moves the next payment (dragged in the vault calendar). The payments after it keep their
+ * interval from the new date, so every remaining payment must still fall before the vault ends.
+ */
+export async function rescheduleSavings(vaultId: string, at: Date, now = new Date()) {
+  const vault = await savingVault(vaultId);
+  if (vault.savingsPausedAt) throw new HttpError(409, 'SAVINGS_PAUSED', { message: 'The plan is paused. Resume it first.' });
+  if (!(at.getTime() > now.getTime() + 5 * 60_000)) throw new HttpError(400, 'DATE_IN_PAST', { message: 'Pick a time from now on.' });
+  const remaining = Math.ceil((vault.budgetCents - vault.balanceCents) / vault.savingsPerPaymentCents!);
+  const lastAt = addInterval(at, vault.savingsEvery!, Math.max(0, remaining - 1));
+  if (lastAt >= vault.expiresAt) {
+    throw new HttpError(409, 'PLAN_PAST_END', {
+      message: `The last payment would be on ${lastAt.toDateString()}, after the vault ends. Move the vault's end date first.`,
+    });
+  }
+  const updated = await prisma.vault.update({ where: { id: vault.id }, data: { nextChargeAt: at } });
+  emit('vault:updated', { vaultId });
+  return { nextChargeAt: updated.nextChargeAt, lastPaymentAt: lastAt };
+}
+
 async function savingVault(vaultId: string) {
   const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
   if (!vault) throw new HttpError(404, 'VAULT_NOT_FOUND');

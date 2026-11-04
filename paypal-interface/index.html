@@ -378,6 +378,7 @@
               </div>
               <div class="header-action-group">
                 <span class="paypal-link-status" id="paypalLinkStatus"></span>
+                <button type="button" class="btn-text-link" id="vaultCalendarBtn">Calendar</button>
                 <button type="button" class="btn btn-primary-sm" id="createVaultBtn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   <span>Create</span>
@@ -1020,6 +1021,41 @@
       <div id="vdBody" class="vd-body"></div>
     </div>
   </dialog>
+
+  <!-- Vault calendar (Bryntum Calendar). Not a <dialog>: Bryntum's popups live on <body> and must show above it. -->
+  <div class="cal-overlay hidden" id="vaultCalendar" role="dialog" aria-modal="true" aria-labelledby="calTitle">
+    <div class="cal-sheet">
+      <header class="cal-head">
+        <h2 id="calTitle" class="cal-title">Vault calendar</h2>
+        <span class="cal-status" id="vaultCalendarStatus" role="status"></span>
+        <button type="button" class="dialog-close-btn" id="closeVaultCalendarBtn" aria-label="Close calendar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </header>
+      <div class="cal-host" id="vaultCalendarHost"></div>
+    </div>
+  </div>
+
+  <!-- Vault timeline (Bryntum Scheduler, from the same Bryntum bundle as the calendar) -->
+  <div class="cal-overlay hidden" id="vaultTimeline" role="dialog" aria-modal="true" aria-labelledby="tlTitle">
+    <div class="cal-sheet">
+      <header class="cal-head">
+        <div class="tl-heading">
+          <h2 id="tlTitle" class="cal-title">Timeline</h2>
+          <p class="tl-sub" id="tlSub"></p>
+        </div>
+        <span class="cal-status" id="tlStatus" role="status"></span>
+        <span class="tl-live" id="tlLive" aria-hidden="true"><span class="live-dot on"></span>Live</span>
+        <button type="button" class="dialog-close-btn" id="closeVaultTimelineBtn" aria-label="Close timeline">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </header>
+      <div class="tl-body">
+        <div class="tl-host" id="vaultTimelineHost"></div>
+        <aside class="tl-details" id="tlDetails" aria-live="polite"></aside>
+      </div>
+    </div>
+  </div>
 
   <!-- Notification Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
