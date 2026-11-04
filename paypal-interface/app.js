@@ -727,6 +727,8 @@ document.addEventListener('DOMContentLoaded', () => {
       vaultDraft = editVault
         ? await request(`/me/vaults/${encodeURIComponent(editVault.id)}/policy/preview`, { amount, description, control })
         : await request('/me/vaults/preview', { amount, description, control, payment });
+      // One key per review screen: sending it twice can never create two vaults (server.ts).
+      if (!editVault) vaultDraft.createKey = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
       renderReview(vaultDraft);
       showVaultStep('review');
     } catch (err) {
@@ -869,6 +871,7 @@ document.addEventListener('DOMContentLoaded', () => {
         policy: vaultDraft.policy,
         sourceText: vaultDraft.sourceText,
         password: vaultPassword.value,
+        createKey: vaultDraft.createKey,
         funding,
         friendEmail: funding === 'FRIEND' ? friendEmail : undefined,
         friendMessage: funding === 'FRIEND' ? document.getElementById('vaultFriendMessage').value.trim() : undefined,
@@ -902,6 +905,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (err.status === 401 && err.body?.error === 'WRONG_PASSWORD') {
         setError(reviewError, 'Wrong password.');
         vaultPassword.select();
+      } else if (err.body?.error === 'DUPLICATE_VAULT') {
+        // The same vault was just made (e.g. sent twice): show that one instead of making another.
+        createdVaultId = err.body.vaultId;
+        showVaultStep('progress');
+        renderProgress([['done', escapeHtml(err.message)]]);
+        doneBtn.classList.remove('hidden');
+        vaultDraft = null;
+        loadVaults();
       } else if (err.body?.vaultId && funding === 'FRIEND') {
         // The vault exists but the request did not go out: fund it from the vault's page instead.
         setError(reviewError, `The vault was created, but the request did not go out: ${err.message}. Open the vault to try again or fund it another way.`);

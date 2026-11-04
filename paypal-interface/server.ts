@@ -479,10 +479,41 @@ function askFriend(account: Account, vaultId: string, friendEmail: unknown, mess
   });
 }
 
+// ---- Creating a vault happens once ----
+// The review screen sends a one-time `createKey`. The same key again (double send, or a retry after
+// an error that came after the vault was made) gets the first answer back instead of a second vault.
+// And the same vault (same name and amount) again within 2 minutes is refused, whatever the key.
+const CREATE_KEEP_MS = 10 * 60_000;
+const DUPLICATE_WINDOW_MS = 2 * 60_000;
+type Created = { status: number; body: unknown };
+const creates = new Map<string, Promise<Created>>();
+
 // Step 2: password confirmed -> create the vault, fund it the chosen way, start the AI.
 app.post('/me/vaults', async (req, res) => {
   const account = loggedIn(req);
   if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  const createKey = typeof req.body?.createKey === 'string' && /^[\w-]{8,100}$/.test(req.body.createKey) ? `${account.username}:${req.body.createKey}` : null;
+  const earlier = createKey ? creates.get(createKey) : undefined;
+  if (earlier) {
+    const first = await earlier; // a failed first try rethrows its own error here
+    return res.status(first.status).json(first.body);
+  }
+  const job = createVault(account, req);
+  if (createKey) {
+    creates.set(createKey, job);
+    const forget = () => setTimeout(() => creates.delete(createKey), CREATE_KEEP_MS).unref();
+    job.then(forget, (err) => {
+      // Failed after the vault was made (it carries vaultId): keep the answer, so a retry can't make a
+      // second vault. Failed before (e.g. balance too low): let the customer simply try again.
+      if (err instanceof HttpError && err.extra.vaultId) forget();
+      else creates.delete(createKey);
+    });
+  }
+  const done = await job;
+  res.status(done.status).json(done.body);
+});
+
+async function createVault(account: Account, req: Request): Promise<Created> {
   const funding: FundingMethod = req.body?.funding ?? 'PAYPAL';
   if (!FUNDING_METHODS.includes(funding)) throw new HttpError(400, 'INVALID_FUNDING', { message: 'Pick how to fund the vault.' });
   const plan = req.body?.policy?.savings;
@@ -496,6 +527,21 @@ app.post('/me/vaults', async (req, res) => {
   if (funding === 'FRIEND' && String(req.body.friendEmail).trim().toLowerCase() === sandboxEmail.toLowerCase()) {
     throw new HttpError(400, 'CANNOT_ASK_YOURSELF', { message: 'That is your own PayPal. Pick "Pay with PayPal" instead.' });
   }
+  const twin = await prisma.vault.findFirst({
+    where: {
+      userId,
+      name: String(req.body?.policy?.vault_name ?? ''),
+      budgetCents: Math.round(Number(req.body?.policy?.allocated_budget) * 100),
+      createdAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (twin) {
+    throw new HttpError(409, 'DUPLICATE_VAULT', {
+      message: `You created "${twin.name}" a moment ago, so no second one was made. Open it from your vaults.`,
+      vaultId: twin.id,
+    });
+  }
   // Only "Pay with PayPal" takes money from the saved account (Pay Later and friends pay on PayPal itself).
   const link = funding === 'PAYPAL' ? await linkFor(account, req) : null;
   // Paid over time: only the first payment is taken now.
@@ -503,11 +549,16 @@ app.post('/me/vaults', async (req, res) => {
   if (funding === 'PAYPAL') await checkBalance(account, firstCents);
 
   const vault = await kubepay('POST', '/api/vaults', { policy: req.body.policy, sourceText: req.body.sourceText, userId });
-  if (funding === 'PAYLATER') return res.status(201).json({ ...(await ownVault(account, vault.id)), funding });
+  // Answer from here on even if reading the vault back fails: it exists, so a retry must not make another.
+  const created = async (extra: Record<string, unknown> = {}): Promise<Created> => ({
+    status: 201,
+    body: { ...(await ownVault(account, vault.id).catch(() => vault)), ...extra },
+  });
+  if (funding === 'PAYLATER') return created({ funding });
   if (funding === 'FRIEND') {
     try {
       const request = await askFriend(account, vault.id, req.body.friendEmail, req.body.friendMessage);
-      return res.status(201).json({ ...(await ownVault(account, vault.id)), funding, request });
+      return created({ funding, request });
     } catch (err) {
       // The vault stays "awaiting funding": it can be funded another way from its page.
       const message = err instanceof KubePayError ? err.message : (err as Error).message;
@@ -531,8 +582,8 @@ app.post('/me/vaults', async (req, res) => {
   } finally {
     balanceChanged(account);
   }
-  res.status(201).json(await ownVault(account, vault.id));
-});
+  return created();
+}
 
 app.get('/me/vaults/:id', async (req, res) => {
   res.json(await ownVault(loggedIn(req), req.params.id));
