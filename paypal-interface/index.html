@@ -887,7 +887,7 @@
       <div class="dialog-header">
         <div class="dialog-header-left">
           <h2 id="createVaultModalTitle" class="dialog-title">Create a Vault</h2>
-          <p class="dialog-subtitle" id="vaultStepSubtitle">Put money aside and tell the AI what it is for.</p>
+          <p class="dialog-subtitle" id="vaultStepSubtitle"></p>
         </div>
         <button type="button" class="dialog-close-btn" id="closeVaultModalBtn" aria-label="Close dialog">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -896,60 +896,73 @@
 
       <!-- Step 1: describe -->
       <form id="vaultStepDescribe" class="dialog-form">
+        <!-- Buy or Save (hidden when changing a vault) -->
+        <div class="vault-kind-switch" id="vaultKindGroup" role="radiogroup" aria-label="Vault type">
+          <label><input type="radio" name="vaultKind" value="BUY" checked><span>Buy</span></label>
+          <label><input type="radio" name="vaultKind" value="SAVE"><span>Save</span></label>
+        </div>
+
         <div class="form-group">
-          <label for="vaultAmountInput" class="form-label">1. Amount ($ USD)</label>
+          <label for="vaultAmountInput" class="form-label">Amount</label>
           <div class="input-with-prefix">
             <span class="prefix-symbol">$</span>
             <input type="number" id="vaultAmountInput" class="form-input amt-input" placeholder="50.00" min="1" max="10000" step="0.01" required>
           </div>
-          <span class="vault-input-hint" id="vaultAmountHint">This much is taken from your PayPal balance and locked in the vault.</span>
+          <span class="vault-input-hint hidden" id="vaultAmountHint"></span> <!-- only when changing a vault -->
         </div>
 
         <div class="form-group">
-          <label for="vaultDescInput" class="form-label">2. What should the AI do with it?</label>
-          <textarea id="vaultDescInput" class="form-input vault-desc-textarea" rows="3" placeholder="e.g. Buy noise-cancelling headphones before Sunday, max $45, only from BestBuy" required></textarea>
-          <span class="vault-input-hint">Plain English. Limits, shops, deadline: the AI turns it into rules it can never break. A list works too: “laptop ≤ $600, bag ≤ $50, headphones ≤ $40”.</span>
+          <label for="vaultDescInput" class="form-label">Description</label>
+          <textarea id="vaultDescInput" class="form-input vault-desc-textarea" rows="3" placeholder="e.g. Noise-cancelling headphones before Sunday, max $45, only from BestBuy" required></textarea>
         </div>
 
-        <div class="form-group">
-          <span class="form-label" id="vaultControlLabel">3. How much should the AI do on its own?</span>
-          <div class="control-picker" role="radiogroup" aria-labelledby="vaultControlLabel">
-            <label class="control-option">
-              <input type="radio" name="vaultControl" value="ASK_ME" checked>
-              <span><strong>Ask me</strong><small>The AI shows its top 3 options with pros and cons. You tap one.</small></span>
+        <!-- On: the AI asks you (top 3 options). Off: autopilot. -->
+        <div class="ask-toggle-row">
+          <label for="vaultAskToggle" class="form-label">Ask me</label>
+          <input type="checkbox" role="switch" id="vaultAskToggle" class="ios-switch" checked>
+        </div>
+
+        <!-- Buy: how the vault gets its money -->
+        <div class="form-group" id="vaultPayGroup">
+          <span class="form-label" id="vaultPayLabel">Pay</span>
+          <div class="pay-options" role="radiogroup" aria-labelledby="vaultPayLabel">
+            <label class="pay-option">
+              <input type="radio" name="vaultFunding" value="PAYPAL" checked>
+              <span class="funding-icon" aria-hidden="true">P</span>
+              <span>Pay now</span>
             </label>
-            <label class="control-option">
-              <input type="radio" name="vaultControl" value="ASK_ABOVE">
-              <span><strong>Ask above an amount</strong><small>Buys on its own up to
-                <span class="control-above">$<input type="number" id="vaultControlAbove" class="form-input" min="0.01" step="0.01" placeholder="30" aria-label="Ask me above this amount"></span>,
-                asks you above it.</small></span>
+            <label class="pay-option">
+              <input type="radio" name="vaultFunding" value="PAYLATER">
+              <span class="funding-icon later" aria-hidden="true">4</span>
+              <span>Pay later</span>
             </label>
-            <label class="control-option">
-              <input type="radio" name="vaultControl" value="AUTOPILOT">
-              <span><strong>Autopilot</strong><small>Buys within your rules without asking.</small></span>
+            <label class="pay-option">
+              <input type="radio" name="vaultFunding" value="FRIEND">
+              <span class="funding-icon friend" aria-hidden="true">✉</span>
+              <span>Ask a friend</span>
             </label>
           </div>
+          <div class="friend-fields hidden" id="vaultFriendFields">
+            <input type="email" id="vaultFriendEmail" class="form-input" list="friendSuggestions" placeholder="Friend's PayPal email" autocomplete="off" aria-label="Friend's PayPal email">
+            <input type="text" id="vaultFriendMessage" class="form-input" maxlength="200" placeholder="Message (optional)" aria-label="Message for your friend">
+          </div>
+          <datalist id="friendSuggestions"></datalist>
         </div>
 
-        <div class="form-group" id="vaultPaymentGroup">
-          <span class="form-label" id="vaultPaymentLabel">4. How do you want to pay it in?</span>
-          <div class="control-picker" role="radiogroup" aria-labelledby="vaultPaymentLabel">
-            <label class="control-option">
-              <input type="radio" name="vaultPayment" value="NOW" checked>
-              <span><strong>All now</strong><small>The whole amount is taken from your PayPal today.</small></span>
-            </label>
-            <label class="control-option">
-              <input type="radio" name="vaultPayment" value="OVER_TIME">
-              <span><strong>Pay over time</strong><small>
-                <span class="control-above">$<input type="number" id="vaultPaymentAmount" class="form-input" min="0.01" step="0.01" placeholder="20" aria-label="Amount per payment"></span>
-                every
-                <select id="vaultPaymentEvery" class="form-select control-every" aria-label="How often">
-                  <option value="MONTH">month</option>
-                  <option value="WEEK">week</option>
-                  <option value="DAY">day</option>
-                </select>,
-                taken from your PayPal automatically (the first one today). The vault saves until it holds the full amount, then the AI shops. To only save, say so above (e.g. “Emergency fund”).</small></span>
-            </label>
+        <!-- Save: pay in over time -->
+        <div class="form-group hidden" id="vaultSaveGroup">
+          <span class="form-label" id="vaultSaveLabel">Save</span>
+          <div class="save-plan" role="group" aria-labelledby="vaultSaveLabel">
+            <div class="input-with-prefix">
+              <span class="prefix-symbol">$</span>
+              <input type="number" id="vaultPaymentAmount" class="form-input" min="0.01" step="0.01" placeholder="20" aria-label="Amount per payment">
+            </div>
+            <span>every</span>
+            <select id="vaultPaymentEvery" class="form-select" aria-label="How often">
+              <option value="MONTH">month</option>
+              <option value="WEEK">week</option>
+              <option value="DAY">day</option>
+            </select>
           </div>
         </div>
 
@@ -966,33 +979,6 @@
         <dl class="vault-review" id="vaultReview"></dl>
         <ul class="vault-warnings hidden" id="vaultWarnings"></ul>
 
-        <!-- How the vault gets its money (new vaults paid all at once; app.js hides it otherwise) -->
-        <div class="form-group" id="vaultFundingGroup">
-          <span class="form-label" id="vaultFundingLabel">How do you want to fund it?</span>
-          <div class="control-picker funding-picker" role="radiogroup" aria-labelledby="vaultFundingLabel">
-            <label class="control-option funding-option">
-              <input type="radio" name="vaultFunding" value="PAYPAL" checked>
-              <span class="funding-icon" aria-hidden="true">P</span>
-              <span><strong>Pay with PayPal</strong><small id="fundPaypalText">The whole amount is taken from your PayPal now.</small></span>
-            </label>
-            <label class="control-option funding-option">
-              <input type="radio" name="vaultFunding" value="PAYLATER">
-              <span class="funding-icon later" aria-hidden="true">4</span>
-              <span><strong>PayPal Pay Later</strong><small id="fundPayLaterText">The vault gets the full amount today. You pay PayPal back over time.</small></span>
-            </label>
-            <label class="control-option funding-option">
-              <input type="radio" name="vaultFunding" value="FRIEND">
-              <span class="funding-icon friend" aria-hidden="true">✉</span>
-              <span><strong>Ask a friend on PayPal</strong><small>We send a PayPal money request to your friend. Their payment goes straight into this vault, not your account.</small></span>
-            </label>
-          </div>
-          <div class="friend-fields hidden" id="vaultFriendFields">
-            <label for="vaultFriendEmail" class="form-label">Friend's PayPal email</label>
-            <input type="email" id="vaultFriendEmail" class="form-input" list="friendSuggestions" placeholder="friend@example.com" autocomplete="off">
-            <input type="text" id="vaultFriendMessage" class="form-input" maxlength="200" placeholder="Message for them (optional), e.g. Your birthday shoes!">
-          </div>
-        </div>
-        <datalist id="friendSuggestions"></datalist>
 
         <div class="vault-link-box hidden" id="vaultLinkBox"></div> <!-- filled by app.js (renderReview) -->
 

@@ -220,8 +220,9 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   const kindText = (type) => ({ UTILITY: 'bill payments', SAVINGS: 'savings', SHOPPING: 'shopping' }[type] ?? type);
 
+  // Buy: paid in now. Save: $X every day/week/month.
   function readPayment(root) {
-    const mode = root.querySelector('input[name="vaultPayment"]:checked')?.value ?? 'NOW';
+    const mode = root.querySelector('input[name="vaultKind"]:checked')?.value === 'SAVE' ? 'OVER_TIME' : 'NOW';
     if (mode === 'NOW') return { mode };
     const amount = Number(document.getElementById('vaultPaymentAmount').value);
     if (!(amount > 0)) return { error: 'Enter how much to pay in each time.' };
@@ -637,8 +638,8 @@ document.addEventListener('DOMContentLoaded', () => {
     progress: document.getElementById('vaultStepProgress'),
   };
   const vaultSubtitles = {
-    describe: 'Put money aside and tell the AI what it is for.',
-    review: 'Check the rules the AI wrote. They are enforced on every payment.',
+    describe: '',
+    review: '',
     progress: 'Setting up your vault…',
   };
   const changeSubtitles = {
@@ -656,16 +657,32 @@ document.addEventListener('DOMContentLoaded', () => {
   const doneBtn = document.getElementById('vaultDoneBtn');
   const vaultModalTitle = document.getElementById('createVaultModalTitle');
   const amountHint = document.getElementById('vaultAmountHint');
-  const controlAboveInput = document.getElementById('vaultControlAbove');
-  controlAboveInput.addEventListener('focus', () => {
-    vaultSteps.describe.querySelector('input[name="vaultControl"][value="ASK_ABOVE"]').checked = true;
-  });
-  for (const id of ['vaultPaymentAmount', 'vaultPaymentEvery']) {
-    document.getElementById(id).addEventListener('focus', () => {
-      vaultSteps.describe.querySelector('input[name="vaultPayment"][value="OVER_TIME"]').checked = true;
-    });
+  const askToggle = document.getElementById('vaultAskToggle');
+  const friendEmailInput = document.getElementById('vaultFriendEmail');
+  const createTexts = { placeholder: descInput.placeholder };
+  const savePlaceholder = 'e.g. Emergency fund, or save for a laptop and buy it under $600';
+  let editControl = null; // the vault's control setting when changing it, kept unless the switch is flipped
+
+  const vaultKind = () => (editVault ? null : vaultSteps.describe.querySelector('input[name="vaultKind"]:checked')?.value ?? 'BUY');
+
+  // Shows the Pay row for Buy, the savings plan for Save, and the friend fields for "Ask a friend".
+  function updateDescribeUI() {
+    const kind = vaultKind();
+    document.getElementById('vaultKindGroup').classList.toggle('hidden', !kind);
+    document.getElementById('vaultPayGroup').classList.toggle('hidden', kind !== 'BUY');
+    document.getElementById('vaultSaveGroup').classList.toggle('hidden', kind !== 'SAVE');
+    const method = vaultSteps.describe.querySelector('input[name="vaultFunding"]:checked')?.value;
+    document.getElementById('vaultFriendFields').classList.toggle('hidden', kind !== 'BUY' || method !== 'FRIEND');
+    if (kind) descInput.placeholder = kind === 'SAVE' ? savePlaceholder : createTexts.placeholder;
   }
-  const createTexts = { hint: amountHint.textContent, placeholder: descInput.placeholder };
+
+  vaultSteps.describe.addEventListener('change', (e) => {
+    if (e.target === askToggle) editControl = null;
+    if (e.target.name !== 'vaultKind' && e.target.name !== 'vaultFunding') return;
+    setError(describeError, '');
+    updateDescribeUI();
+    if (e.target.value === 'FRIEND') friendEmailInput.focus();
+  });
   let vaultDraft = null;
   let createdVaultId = null;
   let editVault = null; // set while changing an existing vault's rules (same dialog as "Create")
@@ -686,14 +703,12 @@ document.addEventListener('DOMContentLoaded', () => {
     descInput.placeholder = vault ? 'e.g. Buy a mechanical keyboard instead, max $90' : createTexts.placeholder;
     amountHint.textContent = vault
       ? `Now ${usd(vault.budgetCents)}. Lower it and the difference comes back to your PayPal; raise it and the extra is taken from your PayPal.`
-      : createTexts.hint;
+      : '';
+    amountHint.classList.toggle('hidden', !vault);
     if (vault) amountInput.value = (vault.budgetCents / 100).toFixed(2);
-    setControlInputs(vaultSteps.describe, 'vaultControl', controlAboveInput, vault?.policy?.rules);
-    document.getElementById('vaultPaymentGroup').classList.toggle('hidden', !!vault); // a plan is fixed once made
-    if (!vault) vaultSteps.describe.querySelector('input[name="vaultPayment"][value="NOW"]').checked = true;
-    vaultSteps.review.querySelector('input[name="vaultFunding"][value="PAYPAL"]').checked = true;
-    document.getElementById('vaultFriendEmail').value = '';
-    document.getElementById('vaultFriendMessage').value = '';
+    editControl = vault ? controlOf(vault.policy?.rules) : null;
+    askToggle.checked = !editControl || editControl.mode !== 'AUTOPILOT';
+    updateDescribeUI(); // the type and payment are fixed once a vault is made
     document.getElementById('friendSuggestions').innerHTML = (currentUser?.friends ?? [])
       .map((f) => `<option value="${escapeHtml(f.email)}">${escapeHtml(f.name)}</option>`).join('');
     const payLaterBox = document.getElementById('vaultPayLaterBox');
@@ -714,15 +729,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!(amount >= 1)) return setError(describeError, 'Enter an amount of at least $1.');
     const payment = editVault ? undefined : readPayment(vaultSteps.describe);
     if (payment?.error) return setError(describeError, payment.error);
-    if (payment?.mode === 'OVER_TIME' && payment.amount >= amount) return setError(describeError, 'Each payment must be smaller than the amount (or pay it all now).');
-    // Only this comes from PayPal now (over time: just the first payment).
-    const newMoneyCents = payment?.mode === 'OVER_TIME' ? Math.round(payment.amount * 100) : Math.round(amount * 100) - (editVault?.budgetCents ?? 0);
+    if (payment?.mode === 'OVER_TIME' && payment.amount >= amount) return setError(describeError, 'Each payment must be smaller than the amount (or choose Buy and pay it all now).');
+    const funding = payment?.mode === 'NOW' ? vaultSteps.describe.querySelector('input[name="vaultFunding"]:checked')?.value ?? 'PAYPAL' : 'PAYPAL';
+    if (funding === 'FRIEND' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(friendEmailInput.value.trim())) {
+      friendEmailInput.focus();
+      return setError(describeError, "Enter your friend's PayPal email.");
+    }
+    // Only this comes from your PayPal balance now (Save: just the first payment; Pay later / a friend: nothing).
+    const newMoneyCents = funding !== 'PAYPAL' ? 0
+      : payment?.mode === 'OVER_TIME' ? Math.round(payment.amount * 100) : Math.round(amount * 100) - (editVault?.budgetCents ?? 0);
     if (balanceCents !== null && newMoneyCents > balanceCents) return setError(describeError, `That needs ${usd(newMoneyCents)} more than your PayPal balance (${usd(balanceCents)}).`);
-    if (description.length < 5) return setError(describeError, 'Tell the AI what the vault is for.');
-    const control = readControl(vaultSteps.describe, 'vaultControl', controlAboveInput);
-    if (control.error) return setError(describeError, control.error);
+    if (description.length < 5) return setError(describeError, 'Add a description of what the vault is for.');
+    const control = editControl ?? { mode: askToggle.checked ? 'ASK_ME' : 'AUTOPILOT' };
 
-    busy(continueBtn, 'AI is writing the rules…');
+    busy(continueBtn, 'Continue');
     try {
       vaultDraft = editVault
         ? await request(`/me/vaults/${encodeURIComponent(editVault.id)}/policy/preview`, { amount, description, control })
@@ -737,6 +757,19 @@ document.addEventListener('DOMContentLoaded', () => {
       busy(continueBtn, null);
     }
   });
+
+  // The AI's notes that are real problems with what you asked (texts from packages/policy/src/compiler.ts).
+  // Notes about defaults it filled in (7-day end date, no per-payment limit, monthly interval...) are not shown.
+  const PROBLEM_NOTES = [
+    /^Not registered, so removed:/,
+    /^Vaults last at most 90 days/,
+    /^A shopping list holds at most 10 items/,
+    /limit lowered to the vault amount/,
+    /^The item limits add up to/,
+    /covers the whole .*paid in one go/,
+    /^Bill vaults top up with a monthly PayPal subscription/,
+  ];
+  const realProblems = (notes) => (notes ?? []).filter((n) => PROBLEM_NOTES.some((re) => re.test(n)));
 
   // The policy as [label, text] rows (text is already HTML-escaped).
   function policyRows(p) {
@@ -781,30 +814,24 @@ document.addEventListener('DOMContentLoaded', () => {
         : k === 'Payments' ? `${v}, from ${escapeHtml(currentUser?.sandboxEmail ?? 'your PayPal')}`
         : k === 'Ends' ? `${v} <span class="muted">(leftover money comes back to you)</span>` : v]);
     }
-    document.getElementById('vaultReview').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')
-      + `<dt>Rules written by</dt><dd class="muted">${escapeHtml(draft.model ?? 'AI')}</dd>`;
+    document.getElementById('vaultReview').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
 
     const warnings = document.getElementById('vaultWarnings');
-    warnings.innerHTML = (draft.warnings ?? []).map((w) => `<li>${escapeHtml(w)}</li>`).join('');
-    warnings.classList.toggle('hidden', !draft.warnings?.length);
+    const problems = realProblems(draft.warnings);
+    warnings.innerHTML = problems.map((w) => `<li>${escapeHtml(w)}</li>`).join('');
+    warnings.classList.toggle('hidden', !problems.length);
 
-    // New vault paid all at once: pick how it gets its money (a savings plan is always your own PayPal).
-    const canChoose = !editVault && !p.savings;
-    document.getElementById('vaultFundingGroup').classList.toggle('hidden', !canChoose);
-    if (canChoose) {
-      const cents = Math.round(p.allocated_budget * 100);
-      document.getElementById('fundPaypalText').textContent = `${usd(cents)} is taken from your PayPal (${currentUser?.sandboxEmail ?? 'linked account'}) right now.`;
-      document.getElementById('fundPayLaterText').textContent = payLaterText(cents);
-    }
     updateFundingUI();
     setError(reviewError, '');
     vaultPassword.value = '';
     if (!vaultPassword.closest('.hidden')) setTimeout(() => vaultPassword.focus(), 0);
   }
 
+  // Chosen on the first screen (Buy only; Save is always paid in from your own PayPal).
   const fundingChoice = () => (vaultDraft && !editVault && !vaultDraft.policy.savings
-    ? vaultSteps.review.querySelector('input[name="vaultFunding"]:checked')?.value ?? 'PAYPAL'
+    ? vaultSteps.describe.querySelector('input[name="vaultFunding"]:checked')?.value ?? 'PAYPAL'
     : 'PAYPAL');
+
 
   // Shows what the chosen funding method needs: the PayPal link (only to take money from your
   // PayPal), the friend's email, and the right button text.
@@ -813,7 +840,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!draft) return;
     const p = draft.policy;
     const method = fundingChoice();
-    document.getElementById('vaultFriendFields').classList.toggle('hidden', method !== 'FRIEND');
     const takesFromPayPal = method === 'PAYPAL' && (!editVault || draft.changeCents > 0);
     const linked = !takesFromPayPal || !!currentUser?.paypalLinked;
     const linkBox = document.getElementById('vaultLinkBox');
@@ -823,10 +849,11 @@ document.addEventListener('DOMContentLoaded', () => {
       : `<p><strong>Your PayPal account is not connected.</strong> ${escapeHtml(currentUser?.paypalLinkError ?? '')}</p>
          <button type="button" class="btn btn-primary-sm link-retry-btn">Try again</button>
          <button type="button" class="btn-text-link link-paypal-btn">Link manually</button>`;
-    document.getElementById('vaultPasswordGroup').classList.toggle('hidden', !linked);
+    // Pay later: the PayPal window is the only sign-in, so no password here.
+    document.getElementById('vaultPasswordGroup').classList.toggle('hidden', !linked || method === 'PAYLATER');
     payBtn.disabled = !linked;
     payBtn.dataset.label = !editVault && p.savings ? `Pay first ${usdDollars(Math.min(p.savings.amount_per_payment, p.allocated_budget))} &amp; create vault`
-      : !editVault && method === 'PAYLATER' ? 'Create vault &amp; continue to Pay Later'
+      : !editVault && method === 'PAYLATER' ? 'Continue to PayPal Pay Later'
       : !editVault && method === 'FRIEND' ? 'Create vault &amp; send request'
       : !editVault ? `Pay ${usdDollars(p.allocated_budget)} &amp; create vault`
       : draft.changeCents > 0 ? `Pay ${usd(draft.changeCents)} &amp; update vault`
@@ -834,13 +861,6 @@ document.addEventListener('DOMContentLoaded', () => {
       : 'Update vault';
     payBtn.innerHTML = payBtn.dataset.label;
   }
-
-  vaultSteps.review.addEventListener('change', (e) => {
-    if (e.target.name !== 'vaultFunding') return;
-    setError(reviewError, '');
-    updateFundingUI();
-    if (fundingChoice() === 'FRIEND') document.getElementById('vaultFriendEmail').focus();
-  });
 
   document.getElementById('vaultBackBtn').addEventListener('click', () => showVaultStep('describe'));
 
@@ -854,23 +874,19 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     if (!vaultDraft || payBtn.disabled) return;
     setError(reviewError, '');
-    if (!vaultPassword.value) return setError(reviewError, 'Enter your password to confirm.');
+    const funding = fundingChoice();
+    if (funding !== 'PAYLATER' && !vaultPassword.value) return setError(reviewError, 'Enter your password to confirm.');
 
     if (editVault) return submitPolicyChange();
     const plan = vaultDraft.policy.savings;
     const amount = usdDollars(plan ? Math.min(plan.amount_per_payment, vaultDraft.policy.allocated_budget) : vaultDraft.policy.allocated_budget);
-    const funding = fundingChoice();
-    const friendEmail = document.getElementById('vaultFriendEmail').value.trim();
-    if (funding === 'FRIEND' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(friendEmail)) {
-      document.getElementById('vaultFriendEmail').focus();
-      return setError(reviewError, "Enter your friend's PayPal email.");
-    }
+    const friendEmail = friendEmailInput.value.trim();
     busy(payBtn, funding === 'PAYPAL' ? 'Paying…' : funding === 'FRIEND' ? 'Sending request…' : 'Creating vault…');
     try {
       const vault = await request('/me/vaults', {
         policy: vaultDraft.policy,
         sourceText: vaultDraft.sourceText,
-        password: vaultPassword.value,
+        password: funding === 'PAYLATER' ? undefined : vaultPassword.value,
         createKey: vaultDraft.createKey,
         funding,
         friendEmail: funding === 'FRIEND' ? friendEmail : undefined,
@@ -1051,37 +1067,85 @@ document.addEventListener('DOMContentLoaded', () => {
     return `Used ${escapeHtml(step.tool.replace(/_/g, ' '))}`;
   }
 
-  function activityRows(v) {
-    const rows = [];
-    for (const d of v.decisions ?? []) {
-      const req = d.requestJson ?? {};
-      const what = `${usdDollars(req.amount ?? 0)} at ${escapeHtml(req.merchant ?? '?')}`;
-      let text;
-      if (d.result === 'APPROVE' && d.resolvedBy === 'CHOSEN_BY_OWNER') text = `👉 You picked ${what}`;
-      else if (d.result === 'APPROVE') text = `✅ Approved ${what}`;
-      else if (d.result === 'BLOCK') text = `⛔ Blocked ${what}: ${reasons(d.reasons)}`;
-      else if (d.resolvedBy === 'APPROVED_BY_HUMAN') text = `👍 You approved ${what}`;
-      else if (d.resolvedBy === 'REJECTED_BY_HUMAN') text = `👎 You rejected ${what}`;
-      else if (d.resolvedBy === 'CANCELLED_POLICY_CHANGED') text = `🚫 Cancelled ${what}: you changed the vault's rules`;
-      else text = `✋ Needs approval: ${what} (${reasons(d.reasons)})`;
-      rows.push({ at: d.createdAt, text, sub: escapeHtml(req.reason ?? '') });
+  // One Agent logs row: time, a coloured dot (done / waiting for you / blocked / info) and the text.
+  function logRow(step, at) {
+    const out = step.output ?? {};
+    const d = out.decision;
+    const kind = step.tool === 'buy_next' && d
+      ? { APPROVE: 'ok', NEEDS_HUMAN: 'wait' }[d.result] ?? 'block'
+      : step.tool === 'propose_options' ? (out.error ? 'block' : 'wait') : 'info';
+    const text = stepText(step).replace(/^(✅|✋|⛔|👉)\s*/u, '');
+    const time = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `<li class="log-${kind}"><time>${time}</time><span class="log-dot" aria-hidden="true"></span><span class="log-text">${text}</span></li>`;
+  }
+
+  // Activity: every major event, oldest first, then what comes next (a tracker like an order's status).
+  // kind: done | wait (needs you / pending) | block (blocked, rejected, cancelled, failed) | future
+  function timelineEvents(v) {
+    const ev = [];
+    const saving = v.savingsPerPaymentCents !== null && v.savingsPerPaymentCents !== undefined;
+    ev.push({ at: v.createdAt, title: 'Vault created', sub: `${usd(v.budgetCents)} ${saving ? 'savings goal' : 'budget'}`, kind: 'done' });
+    for (const h of v.policyHistory ?? []) {
+      if (h.version > 1) ev.push({ at: h.createdAt, title: `Rules changed (version ${h.version})`, sub: '', kind: 'done' });
+    }
+    for (const r of v.fundRequests ?? []) {
+      ev.push({ at: r.createdAt, title: `Asked ${escapeHtml(r.payerEmail)} for ${usd(r.amountCents)}`, sub: r.message ? `“${escapeHtml(r.message)}”` : 'PayPal money request', kind: 'done' });
+      if (r.status === 'CANCELLED') ev.push({ at: r.resolvedAt ?? r.createdAt, title: `Request to ${escapeHtml(r.payerEmail)} cancelled`, sub: '', kind: 'block' });
     }
     for (const e of v.ledger ?? []) {
       const amount = usd(e.amountCents);
-      const state = e.status === 'COMPLETED' ? '' : ` <span class="muted">(${e.status.toLowerCase()})</span>`;
       const friend = e.type === 'FUND' && /^Paid by (\S+) \(PayPal money request\)/.exec(e.note ?? '')?.[1];
-      const text = friend ? `💌 ${amount} from ${escapeHtml(friend)} (PayPal money request)${state}`
-        : e.type === 'FUND' ? `💰 ${amount} added from your PayPal${state}`
-        : e.type === 'SPEND' ? `💸 Paid ${amount} to ${escapeHtml(e.merchant?.name ?? 'merchant')}${e.paidVia === 'CHECKOUT' ? ' <span class="checkout-badge" title="Paid with PayPal Checkout: a real PayPal purchase with buyer protection">🛡 PayPal Checkout</span>' : ''}${state}`
-        : `↩️ ${amount} refunded to your PayPal${state}`;
-      rows.push({ at: e.createdAt, text, sub: '' });
+      const title = friend ? `${amount} received from ${escapeHtml(friend)}`
+        : e.type === 'FUND' ? `${amount} added from your PayPal`
+        : e.type === 'SPEND' ? `Paid ${amount} to ${escapeHtml(e.merchant?.name ?? 'merchant')}${e.paidVia === 'CHECKOUT' ? ' <span class="checkout-badge" title="Paid with PayPal Checkout: a real PayPal purchase with buyer protection">🛡 PayPal Checkout</span>' : ''}`
+        : `${amount} refunded to your PayPal`;
+      const kind = e.status === 'COMPLETED' ? 'done' : e.status === 'PENDING' ? 'wait' : 'block';
+      ev.push({ at: e.createdAt, title, sub: e.status === 'COMPLETED' ? '' : e.status.toLowerCase(), kind });
     }
-    for (const r of v.fundRequests ?? []) {
-      const what = `${usd(r.amountCents)} from ${escapeHtml(r.payerEmail)}`;
-      rows.push({ at: r.createdAt, text: `✉ Asked ${what} on PayPal`, sub: r.message ? `“${escapeHtml(r.message)}”` : '' });
-      if (r.status === 'CANCELLED') rows.push({ at: r.resolvedAt ?? r.createdAt, text: `🚫 Request to ${escapeHtml(r.payerEmail)} cancelled`, sub: '' });
+    for (const d of v.decisions ?? []) {
+      const req = d.requestJson ?? {};
+      const what = `${usdDollars(req.amount ?? 0)} at ${escapeHtml(req.merchant ?? '?')}`;
+      const [title, kind] = d.result === 'APPROVE' && d.resolvedBy === 'CHOSEN_BY_OWNER' ? [`You picked ${what}`, 'done']
+        : d.result === 'APPROVE' ? [`Approved ${what}`, 'done']
+        : d.result === 'BLOCK' ? [`Blocked ${what}`, 'block']
+        : d.resolvedBy === 'APPROVED_BY_HUMAN' ? [`You approved ${what}`, 'done']
+        : d.resolvedBy === 'REJECTED_BY_HUMAN' ? [`You rejected ${what}`, 'block']
+        : d.resolvedBy === 'CANCELLED_POLICY_CHANGED' ? [`Cancelled ${what}: rules changed`, 'block']
+        : [`Needs your approval: ${what}`, 'wait'];
+      const why = d.result === 'BLOCK' || (!d.resolvedBy && d.result === 'NEEDS_HUMAN') ? reasons(d.reasons) : '';
+      ev.push({ at: d.createdAt, title, sub: escapeHtml(why || req.reason || ''), kind });
     }
-    return rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+    if ((v.status === 'LIQUIDATED' || v.status === 'EXPIRED') && v.updatedAt) {
+      ev.push({ at: v.updatedAt, title: v.status === 'LIQUIDATED' ? 'Vault closed' : 'Vault expired', sub: '', kind: 'done' });
+    }
+    ev.sort((x, y) => new Date(x.at) - new Date(y.at));
+
+    // What comes next (hollow dots).
+    const next = v.status === 'PENDING_FUNDING' ? ['Waiting for the money']
+      : v.status === 'SAVING' ? [v.nextChargeAt && !v.savings?.pausedAt ? `Next payment ${when(v.nextChargeAt)}` : 'Saving up', 'Goal reached']
+      : v.status === 'ACTIVE' ? [`Vault ends ${when(v.policy?.rules?.expiry_timestamp ?? v.expiresAt)}`]
+      : [];
+    for (const title of next) ev.push({ at: null, title, sub: '', kind: 'future' });
+    return ev;
+  }
+
+  let activityExpanded = false;
+  const TRACK_SHOW = 7; // past events shown before "Show all"
+
+  function timelineHtml(ev) {
+    const past = ev.filter((e) => e.kind !== 'future');
+    const hidden = activityExpanded ? 0 : Math.max(0, past.length - TRACK_SHOW);
+    const shown = [...(hidden ? [past[0]] : []), ...ev.slice(hidden ? hidden + 1 : 0)];
+    const lastPast = shown.filter((e) => e.kind !== 'future').at(-1);
+    const rows = shown.map((e, i) => {
+      const nextDone = shown[i + 1] && shown[i + 1].kind !== 'future';
+      const cls = [`track-${e.kind}`, e === lastPast ? 'track-current' : '', nextDone ? 'line-done' : ''].filter(Boolean).join(' ');
+      const more = hidden && i === 0 ? `<li class="track-more line-done"><span class="track-dot" aria-hidden="true"></span><button type="button" class="btn-text-link" data-action="activity-all">Show ${hidden} more event${hidden > 1 ? 's' : ''}</button></li>` : '';
+      return `<li class="${cls}"><span class="track-dot" aria-hidden="true"></span>
+        <span class="track-title">${e.title}</span>${e.at ? `<span class="track-time">${when(e.at)}</span>` : '<span></span>'}
+        ${e.sub ? `<span class="track-sub">${e.sub}</span>` : ''}</li>${more}`;
+    }).join('');
+    return `<ol class="vd-track">${rows}</ol>`;
   }
 
   // "Fund this vault" for a vault still waiting for its money (HTML; the Pay Later button is mounted after).
@@ -1158,18 +1222,18 @@ document.addEventListener('DOMContentLoaded', () => {
     typed.fundPassword = detailBody.querySelector('.fund-password')?.value ?? '';
     typed.friendEmail = detailBody.querySelector('.fund-friend-email')?.value ?? '';
     typed.friendMessage = detailBody.querySelector('.fund-friend-message')?.value ?? '';
-    const controlEdit = detailBody.querySelector('.vd-control-edit');
-    const controlState = controlEdit && controlEdit.open && id === detailVault?.id ? {
-      control: readControl(controlEdit, 'vdControl', controlEdit.querySelector('.vd-control-above')),
-      above: controlEdit.querySelector('.vd-control-above').value,
-      password: controlEdit.querySelector('.control-password').value,
+    const askConfirm = detailBody.querySelector('.vd-ask-confirm');
+    const controlState = askConfirm && !askConfirm.classList.contains('hidden') && id === detailVault?.id ? {
+      ask: detailBody.querySelector('.vd-ask-toggle').checked,
+      password: askConfirm.querySelector('.control-password').value,
     } : null;
+    if (id !== detailVault?.id) activityExpanded = false;
 
     const [label, pillClass] = statusPill(v);
     const r = v.policy.rules;
     const pct = v.budgetCents > 0 ? Math.min(100, Math.round((v.balanceCents / v.budgetCents) * 100)) : 0;
     const pending = v.status === 'ACTIVE' ? (v.decisions ?? []).filter((d) => d.result === 'NEEDS_HUMAN' && !d.resolvedBy) : [];
-    const steps = (agentSteps[v.id] ?? []).slice(-12);
+    const steps = (agentSteps[v.id] ?? []).slice(-20);
     const agentLine = v.status === 'SAVING' ? 'The agent starts when the vault holds its full amount.'
       : v.status !== 'ACTIVE' ? 'The agent only works while the vault is active.'
       : `${v.lastAgentOutcome ? `Last run: ${OUTCOME_TEXT[v.lastAgentOutcome] ?? v.lastAgentOutcome} (${when(v.lastAgentRunAt)}).` : 'Starting its first run…'}`
@@ -1177,7 +1241,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const canRefund = v.status === 'ACTIVE' || v.status === 'SAVING' || (v.status === 'EXPIRED' && v.balanceCents > 0);
     const sv = v.savings;
     const openProposals = v.status === 'ACTIVE' ? (v.proposals ?? []).filter((p) => p.status === 'OPEN') : [];
-    const activity = activityRows(v);
+    const activity = timelineEvents(v);
+    const asks = controlOf(r).mode !== 'AUTOPILOT';
     const history = v.policyHistory ?? [];
     detailVault = v;
 
@@ -1271,30 +1336,29 @@ document.addEventListener('DOMContentLoaded', () => {
         <p class="form-error hidden" id="vdApprovalError" role="alert"></p>
       </section>` : ''}
 
-      ${v.type === 'SAVINGS' ? '' : `<section class="vd-section">
+      ${v.type === 'SAVINGS' || v.status !== 'ACTIVE' ? '' : `
+      <div class="vd-ask">
+        <div class="ask-toggle-row">
+          <label for="vdAskToggle" class="form-label">Ask me</label>
+          <input type="checkbox" role="switch" id="vdAskToggle" class="ios-switch vd-ask-toggle" data-saved="${asks}"${asks ? ' checked' : ''}>
+        </div>
+        <div class="vd-approval-actions vd-ask-confirm hidden">
+          <input type="password" class="form-input control-password" placeholder="Password" aria-label="Password to change Ask me">
+          <button type="button" class="btn btn-primary-sm" data-action="save-control">Save</button>
+          <button type="button" class="btn-ghost-sm" data-action="cancel-control">Cancel</button>
+        </div>
+      </div>`}
+
+      ${v.type === 'SAVINGS' ? '' : `<section class="vd-section vd-agent">
         <div class="vd-section-head">
-          <h3>AI agent</h3>
+          <h3>Agent logs</h3>
           <div class="vd-actions">
             ${v.status === 'ACTIVE' ? '<button type="button" class="btn btn-primary-sm" data-action="run-agent">Run now</button>' : ''}
             ${v.status === 'ACTIVE' && v.nextAgentRunAt ? '<button type="button" class="btn-ghost-sm" data-action="stop-agent">Stop watching</button>' : ''}
           </div>
         </div>
-        <p class="muted">${agentLine}</p>
-        ${v.status === 'ACTIVE' ? `
-        <details class="vd-control-edit">
-          <summary>Change how much the AI does on its own (now: ${escapeHtml(controlText(r))})</summary>
-          <div class="control-picker" role="radiogroup" aria-label="Control setting">
-            <label class="control-option"><input type="radio" name="vdControl" value="ASK_ME"><span><strong>Ask me</strong><small>Top 3 options with pros and cons. You tap one.</small></span></label>
-            <label class="control-option"><input type="radio" name="vdControl" value="ASK_ABOVE"><span><strong>Ask above an amount</strong><small>Buys on its own up to
-              <span class="control-above">$<input type="number" class="form-input vd-control-above" min="0.01" step="0.01" aria-label="Ask me above this amount"></span>, asks you above it.</small></span></label>
-            <label class="control-option"><input type="radio" name="vdControl" value="AUTOPILOT"><span><strong>Autopilot</strong><small>Buys within your rules without asking.</small></span></label>
-          </div>
-          <div class="vd-approval-actions">
-            <input type="password" class="form-input control-password" placeholder="Password" aria-label="Password to change the control setting">
-            <button type="button" class="btn btn-primary-sm" data-action="save-control">Save</button>
-          </div>
-        </details>` : ''}
-        <ol class="vd-steps" id="vdSteps">${steps.map((s) => `<li><span class="muted small">${new Date(s.at).toLocaleTimeString()}</span> ${stepText(s)}</li>`).join('')}</ol>
+        <p class="vd-agent-status"><span class="live-dot${v.status === 'ACTIVE' ? ' on' : ''}" aria-hidden="true"></span>${agentLine}</p>
+        <ol class="agent-log" id="vdSteps" data-empty="${v.status === 'ACTIVE' ? 'Logs appear here while the agent works. Tap Run now to start a run.' : 'No logs yet.'}">${steps.map((s) => logRow(s, s.at)).join('')}</ol>
       </section>`}
 
       ${history.length > 1 ? `
@@ -1312,7 +1376,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       <section class="vd-section">
         <h3>Activity</h3>
-        ${activity.length ? `<ul class="vd-activity">${activity.map((a) => `<li><div>${a.text}${a.sub ? `<div class="muted small">${a.sub}</div>` : ''}</div><span class="muted small">${when(a.at)}</span></li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}
+        ${timelineHtml(activity)}
       </section>
 
       ${canRefund ? `
@@ -1345,19 +1409,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
     }
-    const editor = detailBody.querySelector('.vd-control-edit');
-    if (editor) {
-      const aboveBox = editor.querySelector('.vd-control-above');
-      setControlInputs(editor, 'vdControl', aboveBox, r);
-      aboveBox.addEventListener('focus', () => { editor.querySelector('input[value="ASK_ABOVE"]').checked = true; });
-      if (controlState) {
-        editor.open = true;
-        if (controlState.control.mode) editor.querySelector(`input[value="${controlState.control.mode}"]`).checked = true;
-        aboveBox.value = controlState.above;
-        editor.querySelector('.control-password').value = controlState.password;
-      }
+    const askToggleEl = detailBody.querySelector('.vd-ask-toggle');
+    if (askToggleEl && controlState && controlState.ask !== asks) {
+      askToggleEl.checked = controlState.ask;
+      const confirmBox = detailBody.querySelector('.vd-ask-confirm');
+      confirmBox.classList.remove('hidden');
+      confirmBox.querySelector('.control-password').value = controlState.password;
     }
   }
+
+  // Ask me switch: flipping it asks for the password to save (flip back to cancel).
+  detailBody.addEventListener('change', (e) => {
+    if (!e.target.classList.contains('vd-ask-toggle')) return;
+    const changed = String(e.target.checked) !== e.target.dataset.saved;
+    const confirmBox = detailBody.querySelector('.vd-ask-confirm');
+    confirmBox.classList.toggle('hidden', !changed);
+    if (changed) confirmBox.querySelector('.control-password').focus();
+  });
 
   detailBody.addEventListener('click', async (e) => {
     const button = e.target.closest('button[data-action]');
@@ -1366,6 +1434,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const action = button.dataset.action;
     const decision = button.dataset.decision;
     const original = button.textContent;
+    if (action === 'activity-all') {
+      activityExpanded = true;
+      return renderVaultDetail();
+    }
+    if (action === 'cancel-control') {
+      const toggle = detailBody.querySelector('.vd-ask-toggle');
+      toggle.checked = toggle.dataset.saved === 'true';
+      button.closest('.vd-ask-confirm').classList.add('hidden');
+      return;
+    }
     if (action === 'change-policy') {
       const vault = detailVault;
       closeVaultDetail();
@@ -1442,15 +1520,14 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast('PayPal link copied. Send it to your friend.', 'success');
         return;
       } else if (action === 'save-control') {
-        const editor = button.closest('.vd-control-edit');
-        const control = readControl(editor, 'vdControl', editor.querySelector('.vd-control-above'));
-        if (control.error) throw new Error(control.error);
-        const password = editor.querySelector('.control-password').value;
-        if (!password) throw new Error('Enter your password to change the control setting.');
+        const ask = detailBody.querySelector('.vd-ask-toggle').checked;
+        const confirmBox = button.closest('.vd-ask-confirm');
+        const password = confirmBox.querySelector('.control-password').value;
+        if (!password) throw new Error('Enter your password to save.');
         button.textContent = 'Saving…';
-        await request(`/me/vaults/${id}/control`, { control, password });
-        editor.open = false;
-        showToast('Saved. The AI follows the new setting from now on.', 'success');
+        await request(`/me/vaults/${id}/control`, { control: { mode: ask ? 'ASK_ME' : 'AUTOPILOT' }, password });
+        confirmBox.classList.add('hidden');
+        showToast(ask ? 'Saved. The agent asks you before buying.' : 'Saved. The agent is on autopilot.', 'success');
       }
       await Promise.all([renderVaultDetail(), loadVaults(), refreshAccount()]);
     } catch (err) {
@@ -1509,7 +1586,7 @@ document.addEventListener('DOMContentLoaded', () => {
         (agentSteps[step.vaultId] ??= []).push({ ...step, at: Date.now() });
         if (step.vaultId === detailId) {
           const list = document.getElementById('vdSteps');
-          if (list) list.insertAdjacentHTML('beforeend', `<li><span class="muted small">${new Date().toLocaleTimeString()}</span> ${stepText(step)}</li>`);
+          if (list) list.insertAdjacentHTML('beforeend', logRow(step, Date.now()));
         }
       });
     } catch (err) {

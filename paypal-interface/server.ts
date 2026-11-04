@@ -489,9 +489,11 @@ type Created = { status: number; body: unknown };
 const creates = new Map<string, Promise<Created>>();
 
 // Step 2: password confirmed -> create the vault, fund it the chosen way, start the AI.
+// Pay Later needs no password here: no money moves until the customer logs in and approves on PayPal,
+// so that PayPal login is the one sign-in (same as "Fund this vault" -> Pay Later).
 app.post('/me/vaults', async (req, res) => {
   const account = loggedIn(req);
-  if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
+  if (req.body?.funding !== 'PAYLATER' && !passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
   const createKey = typeof req.body?.createKey === 'string' && /^[\w-]{8,100}$/.test(req.body.createKey) ? `${account.username}:${req.body.createKey}` : null;
   const earlier = createKey ? creates.get(createKey) : undefined;
   if (earlier) {
