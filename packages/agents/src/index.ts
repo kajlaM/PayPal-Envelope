@@ -15,3 +15,5 @@ export async function runVaultAgent(input: { vaultId: string; task?: string; onS
   if (vault.type === 'SAVINGS') throw new Error('A savings vault has no agent: it only saves');
   return vault.type === 'UTILITY' ? runBillPayAgent(input) : runShoppingAgent(input);
 }
+export { c3 } from './search.ts';
+export { priceHistory, priceVerdict, historyText } from './channel3.ts';

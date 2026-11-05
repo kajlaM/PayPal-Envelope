@@ -112,6 +112,32 @@ export const PolicySchema = z.object({
 export type Policy = z.infer<typeof PolicySchema>;
 
 /** What an agent sends when it wants to pay. */
+/**
+ * What Channel3's product data told the agent about one product (optional; demo-store products have none):
+ * the same model at each approved store (cheapest first), a photo, and the 90-day price verdict.
+ * Informational only: the Policy Engine never reads it.
+ */
+export const Channel3InsightSchema = z.object({
+  product_id: z.string().max(100).nullable().optional(),
+  image: z.url().nullable().optional(),
+  brand: z.string().max(100).nullable().optional(),
+  stores: z.array(z.object({
+    merchant: z.string().max(100),
+    price: z.number().nonnegative(),
+    was: z.number().nonnegative().nullable().optional(), // the shop's pre-discount price
+    url: z.url().optional(),
+  })).max(10).optional(),
+  saved: z.number().nonnegative().nullable().optional(), // dollars below the dearest store selling the same model
+  history: z.object({
+    status: z.enum(['low', 'typical', 'high']),
+    mean: z.number(),
+    min: z.number(),
+    max: z.number(),
+    days: z.number().int(),
+  }).nullable().optional(),
+});
+export type Channel3Insight = z.infer<typeof Channel3InsightSchema>;
+
 export const SpendRequestSchema = z.object({
   merchant: z.string().min(1),
   amount: z.number().positive(),
@@ -121,6 +147,7 @@ export const SpendRequestSchema = z.object({
   verified_price: z.number().positive().optional(), // from Kernel (Step 8)
   invoice_id: z.string().optional(), // utility vault (Step 8)
   item_id: z.string().optional(), // shopping-list vault: which item this buys
+  channel3: Channel3InsightSchema.optional(), // product data behind the pick (stores compared, price history)
 });
 export type SpendRequest = z.infer<typeof SpendRequestSchema>;
 
@@ -135,6 +162,7 @@ export const ProposalOptionSchema = z.object({
   rating: z.number().nullable().optional(),
   delivery_days: z.number().nullable().optional(),
   condition: z.string().nullable().optional(),
+  channel3: Channel3InsightSchema.optional(),
   pros: z.array(z.string().max(200)).max(5),
   cons: z.array(z.string().max(200)).max(5),
 });

@@ -44,7 +44,8 @@ export async function runAgentForVault(vaultId: string, task?: string) {
 }
 
 /**
- * After a run: BOUGHT / NEEDS_HUMAN stop watching; NO_MATCH or ERROR look again later.
+ * After a run: BOUGHT / NEEDS_HUMAN stop watching; NO_MATCH, WAITING_FOR_PRICE (price above its
+ * 90-day normal, per Channel3) or ERROR look again later.
  * If the rules changed during the run, look again right away with the new rules.
  */
 async function scheduleNext(vaultId: string, outcome: string, startedWith: number) {
@@ -57,7 +58,7 @@ async function scheduleNext(vaultId: string, outcome: string, startedWith: numbe
   const rulesChanged = (vault.policies[0]?.version ?? 0) > startedWith;
   if (rulesChanged && vault.status === 'ACTIVE' && vault.expiresAt > new Date()) {
     next = new Date(); // the scheduler starts a fresh run within a minute
-  } else if (vault.type === 'SHOPPING' && vault.status === 'ACTIVE' && (outcome === 'NO_MATCH' || outcome === 'ERROR')) {
+  } else if (vault.type === 'SHOPPING' && vault.status === 'ACTIVE' && (outcome === 'NO_MATCH' || outcome === 'WAITING_FOR_PRICE' || outcome === 'ERROR')) {
     const minutes = (policy.success && policy.data.shopping?.check_every_minutes) || 180;
     const at = new Date(Date.now() + minutes * 60_000);
     if (at < vault.expiresAt) next = at; // never past expiry; the sweeper refunds expired vaults

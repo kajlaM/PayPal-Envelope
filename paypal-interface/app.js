@@ -60,6 +60,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function enterDashboard(user) {
+    // Business logins (Audio Store, City Utility) have their own seller dashboard.
+    if (user.kind === 'business') return location.assign(user.redirect || '/business');
     showUser(user);
     renderAccount(user);
     setView('dashboard');
@@ -100,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const user = await request('/auth/login', { username, password });
       loginPassword.value = '';
       await enterDashboard(user);
-      showToast(`Welcome back, ${user.name}!`, 'success');
+      if (user.kind !== 'business') showToast(`Welcome back, ${user.name}!`, 'success');
     } catch (err) {
       showLoginError(err.status === 401 ? 'Wrong email/username or password.' : `Could not log in: ${err.message}`);
       loginPassword.select();
@@ -137,8 +139,40 @@ document.addEventListener('DOMContentLoaded', () => {
     NEEDS_HUMAN: 'Waiting for your approval',
     NO_MATCH: 'Nothing matched your rules yet',
     PROPOSED: 'Options ready: pick one',
+    WAITING_FOR_PRICE: 'Waiting for a better price',
     ERROR: 'Last run failed',
   };
+
+  // ---------- Channel3 product data (store comparison, price history, photo) ----------
+  // Same rule as the agent (packages/agents/src/channel3.ts priceVerdict).
+  function c3Verdict(price, h) {
+    if (!h) return null;
+    if (price <= h.min * 1.01 || price <= h.mean * 0.9) return 'low';
+    if (price >= h.mean * 1.1) return 'high';
+    return 'typical';
+  }
+  function c3HistoryText(price, h) {
+    const v = c3Verdict(price, h);
+    if (!v) return '';
+    if (v === 'low') return price <= h.min * 1.01 ? `Lowest price in ${h.days} days` : `Below its ${h.days}-day average (${usdDollars(h.mean)})`;
+    if (v === 'high') return `${usdDollars(price - h.mean)} above its ${h.days}-day average`;
+    return `Typical price (${h.days}-day average ${usdDollars(h.mean)})`;
+  }
+  const c3StoresText = (stores) => (stores ?? []).map((st) => `${st.merchant} ${usdDollars(st.price)}`).join(' · ');
+
+  /** Photo + stores compared + 90-day price badge, for an option card (empty for non-Channel3 products). */
+  function c3Block(c3, price, merchant) {
+    if (!c3) return '';
+    const v = c3Verdict(price, c3.history);
+    const stores = (c3.stores ?? []).length > 1
+      ? `<ul class="c3-stores">${c3.stores.map((st) => `<li class="${st.merchant === merchant ? 'is-pick' : ''}"><span>${escapeHtml(st.merchant)}</span><span>${usdDollars(st.price)}${st.was && st.was > st.price ? ` <s>${usdDollars(st.was)}</s>` : ''}</span></li>`).join('')}</ul>`
+      : '';
+    return `
+      ${c3.image ? `<img class="c3-photo" src="${escapeHtml(c3.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+      ${v ? `<span class="c3-price c3-${v}" title="From Channel3's 90-day price history">${escapeHtml(c3HistoryText(price, c3.history))}</span>` : ''}
+      ${stores}`;
+  }
+  const c3Tag = `<span class="c3-tag" title="Product data, photos, store prices and price history from the Channel3 API">Product data: Channel3</span>`;
 
   // Policy Engine reason codes, in plain words.
   const REASON_TEXT = {
@@ -433,17 +467,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const pct = v.budgetCents > 0 ? Math.min(100, Math.round((v.balanceCents / v.budgetCents) * 100)) : 0;
     const expires = new Date(v.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const watching = v.status !== 'ACTIVE' ? '' : v.openProposals ? ' &bull; 👉 pick an option' : v.nextAgentRunAt ? ' &bull; AI watching' : '';
-    const icon = v.type === 'UTILITY'
-      ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0070BA" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
-      : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#003087" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><circle cx="12" cy="11" r="3"/></svg>';
 
     const el = document.createElement('div');
     el.className = 'vault-card-item';
-    el.tabIndex = 0;
     el.dataset.vaultId = v.id;
     el.innerHTML = `
       <div class="vault-card-header">
-        <div class="vault-icon-circle">${icon}</div>
         <span class="vault-status-pill ${pillClass}">${label}</span>
       </div>
       <div class="vault-info">
@@ -547,18 +576,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Only the card's buttons open things: Timeline -> the timeline, Manage -> the vault.
   document.getElementById('vaultsContainer').addEventListener('click', (e) => {
     const card = e.target.closest('.vault-card-item');
     if (!card) return;
     if (e.target.closest('.vault-timeline-btn')) openVaultTimeline(card.dataset.vaultId);
-    else openVaultDetail(card.dataset.vaultId);
-  });
-  document.getElementById('vaultsContainer').addEventListener('keydown', (e) => {
-    const card = e.target.closest('.vault-card-item');
-    if (card && (e.key === 'Enter' || e.key === ' ')) {
-      e.preventDefault();
-      openVaultDetail(card.dataset.vaultId);
-    }
+    else if (e.target.closest('.vault-manage-btn')) openVaultDetail(card.dataset.vaultId);
   });
 
   // ---------- Vault history (expired / closed vaults, kept for reference) ----------
@@ -1050,16 +1073,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const out = step.output ?? {};
     if (step.tool === 'find_candidates') {
       const dropped = Object.entries(out.dropped ?? {}).map(([k, n]) => `${n} ${k.toLowerCase().replace(/_/g, ' ')}`).join(', ');
-      return `Searched shops: ${out.candidates?.length ?? 0} matching products${dropped ? ` (dropped: ${dropped})` : ''}`;
+      const compared = (out.candidates ?? []).filter((c) => c.compared_stores).length;
+      return `Searched shops (Channel3): ${out.candidates?.length ?? 0} matching products${compared ? `, ${compared} compared across stores` : ''}${dropped ? ` (dropped: ${dropped})` : ''}`;
     }
     if (step.tool === 'skip_candidates') return `Skipped ${out.skipped ?? 0} wrong items`;
     if (step.tool === 'buy_next') {
-      if (out.done) return 'No products left to try';
+      if (out.done) return out.message === 'WAITING_FOR_BETTER_PRICE' ? '⏳ Waiting for a better price (Channel3 price history)' : 'No products left to try';
+      if (out.price_high) return `⏳ Did not buy ${escapeHtml(out.product?.title ?? '')} at ${usdDollars(out.product?.price ?? 0)}: ${escapeHtml(out.price_history ?? 'price is high')}`;
       const d = out.decision;
       const item = out.product ? `${escapeHtml(out.product.title)} at ${escapeHtml(out.product.merchant)} for ${usdDollars(out.product.price)}` : 'next product';
       const live = out.live_price != null ? ` (live price ${usdDollars(out.live_price)})` : ' (live price not readable)';
       if (!d) return `Tried ${item}`;
-      if (d.result === 'APPROVE') return `✅ Bought ${item}${live}`;
+      const c3 = [out.compared_stores ? `compared ${escapeHtml(out.compared_stores)}` : '', out.price_history ? escapeHtml(out.price_history) : ''].filter(Boolean).join('; ');
+      if (d.result === 'APPROVE') return `✅ Bought ${item}${live}${c3 ? ` · ${c3}` : ''}`;
       if (d.result === 'NEEDS_HUMAN') return `✋ Wants to buy ${item}${live}: needs your approval (${reasons(d.reasons)})`;
       return `⛔ Blocked ${item}: ${reasons(d.reasons)}`;
     }
@@ -1304,10 +1330,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       ${openProposals.map((p) => `
       <section class="vd-section vd-options">
-        <h3>👉 Pick one${p.itemName ? ` for “${escapeHtml(p.itemName)}”` : ''}</h3>
+        <h3>👉 Pick one${p.itemName ? ` for “${escapeHtml(p.itemName)}”` : ''}${p.options.some((o) => o.channel3) ? ` ${c3Tag}` : ''}</h3>
         ${p.summary ? `<p>${escapeHtml(p.summary)}</p>` : ''}
         <div class="option-grid">${p.options.map((o, i) => `
           <div class="option-card">
+            ${c3Block(o.channel3, o.verified_price ?? o.price, o.merchant)}
             <a class="option-title" href="${escapeHtml(o.url)}" target="_blank" rel="noopener">${escapeHtml(o.title)}</a>
             <div class="option-price">${usdDollars(o.verified_price ?? o.price)} <span class="muted small">at ${escapeHtml(o.merchant)}</span></div>
             <ul class="option-pros">${o.pros.map((t) => `<li>+ ${escapeHtml(t)}</li>`).join('')}</ul>
@@ -1558,10 +1585,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const calOverlay = document.getElementById('vaultCalendar');
   const calHost = document.getElementById('vaultCalendarHost');
   const calStatus = document.getElementById('vaultCalendarStatus');
-  const BRYNTUM = '/vendor/bryntum-calendar';
+  const BRYNTUM = '/vendor'; // bryntum.js + bryntum.css (scripts/build-bryntum.mjs)
   const VAULT_COLORS = ['#0070BA', '#003087', '#009CDE', '#00875A', '#7B61FF', '#00A3A3', '#C2185B', '#5E6B7A'];
   const KIND_COLORS = { wait: '#E8A317', block: '#D9381E' };
   let calendar = null;
+  let calDragAt = null; // where the event being dragged would land
+  let calDragId = null; // which event is being dragged
+  const calWhatIf = Object.assign(document.createElement('div'), { className: 'cal-whatif-float hidden', role: 'status' });
+  document.body.append(calWhatIf);
+  document.addEventListener('pointerup', () => calWhatIf.classList.add('hidden'));
   let bryntumReady = null;
   let calInfo = new Map(); // event id -> { vaultId, vaultName, color, title, detail, at, upcoming }
 
@@ -1576,14 +1608,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function loadBryntum() {
     bryntumReady ??= Promise.all([
-      loadStyle(`${BRYNTUM}/calendar.css`),
-      loadStyle(`${BRYNTUM}/svalbard-light.css`),
-      loadStyle(`${BRYNTUM}/fontawesome/css/fontawesome.css`),
-      loadStyle(`${BRYNTUM}/fontawesome/css/solid.css`),
-      loadScript(`${BRYNTUM}/calendar.umd.js`),
+      loadStyle(`${BRYNTUM}/bryntum.css`),
+      loadScript(`${BRYNTUM}/bryntum.js`),
     ]).then(() => {
-      if (!window.bryntum?.calendar?.Calendar) throw new Error('Bryntum Calendar did not load.');
-      return window.bryntum.calendar;
+      if (!window.Bryntum?.Calendar) throw new Error('Bryntum did not load.');
+      return window.Bryntum;
     }).catch((err) => { bryntumReady = null; throw err; });
     return bryntumReady;
   }
@@ -1596,12 +1625,74 @@ document.addEventListener('DOMContentLoaded', () => {
     return d;
   };
 
+  // Same rule as the server (packages/policy addInterval): n intervals later, months in UTC.
+  function addIntervals(date, every, n) {
+    const d = new Date(date);
+    if (every === 'DAY') return new Date(d.getTime() + n * 86_400_000);
+    if (every === 'WEEK') return new Date(d.getTime() + n * 7 * 86_400_000);
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + n);
+    d.setUTCDate(Math.min(day, new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()));
+    return d;
+  }
+  const shortDay = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const remainingPayments = (v) => (v.savingsPerPaymentCents ? Math.ceil((v.budgetCents - v.balanceCents) / v.savingsPerPaymentCents) : 0);
+
+  // "What if I drop it here?" One line shown while dragging (calendar, timeline, plan).
+  // Returns { text, ok }: ok=false when the server would refuse it.
+  function whatIf(action, v, oldAt, newAt) {
+    const now = Date.now();
+    if (!newAt || newAt.getTime() < now + 5 * 60_000) return { text: 'Pick a time in the future', ok: false };
+    const days = Math.round((newAt - oldAt) / 86_400_000);
+    const shift = days === 0 ? 'same day' : `${days > 0 ? '+' : '−'}${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}`;
+    if (action === 'expiry') {
+      const max = v.savingsPerPaymentCents ? 730 : 90;
+      if (newAt - now > max * 86_400_000) return { text: `${shift} · at most ${max} days from now`, ok: false };
+      if (v.status === 'SAVING' && v.nextChargeAt) {
+        const last = addIntervals(v.nextChargeAt, v.savingsEvery, Math.max(0, remainingPayments(v) - 1));
+        if (newAt <= last) return { text: `${shift} · must last past the last payment (${shortDay(last)})`, ok: false };
+        return { text: `${shift} · last payment ${shortDay(last)} ✓`, ok: true };
+      }
+      return { text: `${shift} · ${days >= 0 ? 'the agent keeps its budget until' : 'the vault closes'} ${shortDay(newAt)}`, ok: true };
+    }
+    if (action === 'savings-next') {
+      const n = remainingPayments(v);
+      const last = addIntervals(newAt, v.savingsEvery, Math.max(0, n - 1));
+      if (last >= new Date(v.expiresAt)) return { text: `${shift} · last payment ${shortDay(last)} is after the vault ends (${shortDay(v.expiresAt)})`, ok: false };
+      return { text: `${shift} · ${n} payment${n === 1 ? '' : 's'}, last ${shortDay(last)} · vault ends ${shortDay(v.expiresAt)} ✓`, ok: true };
+    }
+    if (action === 'agent-next') {
+      if (newAt >= new Date(v.expiresAt)) return { text: 'After the vault ends', ok: false };
+      const mins = Math.round((newAt - now) / 60_000);
+      return { text: `The agent looks again in ${mins < 90 ? `${mins} min` : mins < 2880 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} days`}`, ok: true };
+    }
+    return { text: '', ok: true };
+  }
+  const whatIfHtml = (w) => `<div class="whatif ${w.ok ? '' : 'whatif-bad'}">${escapeHtml(w.text)}</div>`;
+
   // Vaults (with details) -> Bryntum resources + events. Text is kept as plain text here and
   // HTML-encoded where it is rendered.
+  // Money moved per day across all vaults (Year view heatmap): key 'YYYY-MM-DD' -> { in, out } cents.
+  let calHeat = new Map();
+  let calHeatMax = 1;
+  const dayKey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+
   function calendarData(vaults) {
     const resources = [];
     const events = [];
     const info = new Map();
+    const heat = new Map();
+    for (const v of vaults) {
+      for (const e of v.ledger ?? []) {
+        if (e.status === 'FAILED') continue;
+        const h = heat.get(dayKey(e.createdAt)) ?? { in: 0, out: 0 };
+        if (e.type === 'FUND') h.in += e.amountCents; else h.out += e.amountCents;
+        heat.set(dayKey(e.createdAt), h);
+      }
+    }
+    calHeat = heat;
+    calHeatMax = Math.max(1, ...[...heat.values()].map((h) => h.in + h.out));
     vaults.forEach((v, i) => {
       const color = VAULT_COLORS[i % VAULT_COLORS.length];
       resources.push({ id: v.id, name: v.name, eventColor: color });
@@ -1713,6 +1804,17 @@ document.addEventListener('DOMContentLoaded', () => {
     return { resources, events, info };
   }
 
+  // Year view: each day shaded by how much money moved that day (4 steps), with the amounts on hover.
+  function heatCell(cell) {
+    const h = calHeat.get(dayKey(cell.date));
+    if (!h) return;
+    const level = Math.min(4, Math.max(1, Math.ceil(((h.in + h.out) / calHeatMax) * 4)));
+    const cc = cell.cellConfig;
+    if (cc.className && typeof cc.className === 'object') cc.className[`cal-heat-${level}`] = true;
+    else cc.className = [cc.className, `cal-heat-${level}`].filter(Boolean).join(' ');
+    cc.dataset = { ...(cc.dataset ?? {}), btip: [h.in ? `+${usd(h.in)} in` : '', h.out ? `−${usd(h.out)} out` : ''].filter(Boolean).join(' · ') };
+  }
+
   function calTipHtml(i) {
     const enc = escapeHtml;
     const time = i.allDay
@@ -1729,7 +1831,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Password confirmation as a Bryntum Popup. `save(password)` does the change; an error keeps the popup
   // open with the message. Resolves true when saved, false when cancelled.
   function confirmWithPassword({ title, html, okText, save }) {
-    const { Popup } = window.bryntum.calendar;
+    const { Popup } = window.Bryntum;
     return new Promise((resolve) => {
       let settled = false;
       const settle = (ok) => { if (!settled) { settled = true; resolve(ok); } };
@@ -1782,7 +1884,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const i = calInfo.get(eventRecord.id);
     if (!i?.action) return false;
     if (newStartDate.getTime() === i.at.getTime()) return true;
-    const { Toast } = window.bryntum.calendar;
+    const { Toast } = window.Bryntum;
     if (newStartDate.getTime() < Date.now() + 5 * 60_000) {
       Toast.show('Pick a date in the future.');
       return false;
@@ -1830,7 +1932,11 @@ document.addEventListener('DOMContentLoaded', () => {
         mode: 'month',
         autoCreate: false,
         enableDeleteKey: false, // events mirror the vaults: nothing is deleted from here
-        modes: { agenda: null, month: { showWeekColumn: false, showWeekNumber: false, autoRowHeight: true } },
+        modes: {
+          agenda: null,
+          month: { showWeekColumn: false, showWeekNumber: false, autoRowHeight: true },
+          year: { dayCellRenderer: heatCell, showEvents: false, eventCountTip: false }, // days shaded by money, not by events
+        },
         resources,
         events,
         features: {
@@ -1850,7 +1956,22 @@ document.addEventListener('DOMContentLoaded', () => {
           },
         },
         listeners: {
-          beforeDragMoveEnd: onCalendarDrop,
+          // While dragging: a small pill by the cursor says what the drop would do.
+          // The drag works on a proxy copy, so remember which real event it started from.
+          beforeDragMove: ({ eventRecord }) => { calDragId = eventRecord?.id ?? null; },
+          drag: ({ eventRecord, newStartDate, domEvent }) => {
+            calDragAt = newStartDate;
+            const i = calInfo.get(calDragId) ?? calInfo.get(eventRecord?.id);
+            if (!i?.action || !newStartDate) return;
+            const w = whatIf(i.action, i.vault, i.at, newStartDate);
+            calWhatIf.innerHTML = `<b>${escapeHtml(dayText(newStartDate))}</b>${whatIfHtml(w)}`;
+            calWhatIf.style.left = `${(domEvent?.clientX ?? 0) + 16}px`;
+            calWhatIf.style.top = `${(domEvent?.clientY ?? 0) + 18}px`;
+            calWhatIf.classList.remove('hidden');
+          },
+          beforeDragMoveEnd: (e) => { calWhatIf.classList.add('hidden'); return onCalendarDrop(e); },
+          dragMoveEnd: () => calWhatIf.classList.add('hidden'),
+          activeItemChange: ({ activeItem }) => calOverlay.classList.toggle('cal-mode-year', activeItem?.type === 'yearview' || activeItem?.modeName === 'year'),
         },
       });
       calendar.eventStore.on('beforeRemove', ({ removingAll }) => (removingAll ? undefined : false));
@@ -1991,6 +2112,24 @@ document.addEventListener('DOMContentLoaded', () => {
           : pending ? [`Asks you: ${what}`, 'wait', 'fa fa-hand']
           : [`Asked you: ${what}`, 'done', 'fa fa-hand'];
         add('agent', `dec:${d.id}`, d.createdAt, title, { kind, icon, detail: [req.reason ?? '', d.reasons?.length ? `Why: ${reasons(d.reasons)}` : ''].filter(Boolean).join(' · ') });
+        const c3 = req.channel3;
+        if (c3) {
+          // Channel3 was read just before the purchase: drawn a moment earlier so it sits before it.
+          const before = new Date(new Date(d.createdAt).getTime() - 60_000);
+          if ((c3.stores ?? []).length > 1) {
+            add('agent', `c3s:${d.id}`, before, `Compared ${c3.stores.length} stores`, {
+              icon: 'fa fa-scale-balanced',
+              detail: `Channel3: ${c3StoresText(c3.stores)}${c3.saved ? ` · ${usdDollars(c3.saved)} cheaper than the dearest store` : ''}`,
+            });
+          }
+          if (c3.history) {
+            const v = c3Verdict(req.amount, c3.history);
+            add('agent', `c3h:${d.id}`, before, `Price ${v === 'low' ? 'low' : v === 'high' ? 'high' : 'typical'} vs ${c3.history.days} days`, {
+              kind: v === 'high' ? 'wait' : 'done', icon: 'fa fa-chart-line',
+              detail: `Channel3 price history: ${c3HistoryText(req.amount, c3.history)} (low ${usdDollars(c3.history.min)}, high ${usdDollars(c3.history.max)})`,
+            });
+          }
+        }
         // Decisions keep no answer time, so your answer is shown at the moment the agent asked.
         if (d.resolvedBy === 'APPROVED_BY_HUMAN' || d.resolvedBy === 'REJECTED_BY_HUMAN' || d.resolvedBy === 'CHOSEN_BY_OWNER') {
           const yes = d.resolvedBy !== 'REJECTED_BY_HUMAN';
@@ -2002,13 +2141,23 @@ document.addEventListener('DOMContentLoaded', () => {
       for (const pr of v.proposals ?? []) {
         add('agent', `prop:${pr.id}`, pr.createdAt, `${pr.options?.length ?? 3} options`, {
           kind: pr.status === 'OPEN' ? 'wait' : 'done', icon: 'fa fa-list-check',
-          detail: [pr.summary ?? '', (pr.options ?? []).map((o) => `${o.title} (${usdDollars(o.verified_price ?? o.price)})`).join(' · ')].filter(Boolean).join(' — '),
+          detail: [pr.summary ?? '', (pr.options ?? []).map((o) => {
+            const h = o.channel3?.history ? `, ${c3HistoryText(o.verified_price ?? o.price, o.channel3.history).toLowerCase()}` : '';
+            const st = (o.channel3?.stores ?? []).length > 1 ? `, vs ${c3StoresText(o.channel3.stores.filter((x) => x.merchant !== o.merchant))}` : '';
+            return `${o.title} (${usdDollars(o.verified_price ?? o.price)}${h}${st})`;
+          }).join(' · '), (pr.options ?? []).some((o) => o.channel3) ? 'Product data from Channel3.' : ''].filter(Boolean).join(' — '),
         });
       }
       for (const [n, step] of (agentSteps[v.id] ?? []).entries()) {
         add('agent', `live:${n}`, step.at, stepText(step).replace(/^(✅|✋|⛔|👉)\s*/u, '').replace(/<[^>]+>/g, ''), { icon: 'fa fa-bolt', detail: 'Live step from this session.' });
       }
-      if (v.lastAgentRunAt) add('agent', 'last', v.lastAgentRunAt, `Last run: ${OUTCOME_TEXT[v.lastAgentOutcome] ?? v.lastAgentOutcome ?? 'done'}`, { icon: 'fa fa-robot', detail: 'When the agent last looked.' });
+      if (v.lastAgentRunAt) {
+        const waiting = v.lastAgentOutcome === 'WAITING_FOR_PRICE';
+        add('agent', 'last', v.lastAgentRunAt, `Last run: ${OUTCOME_TEXT[v.lastAgentOutcome] ?? v.lastAgentOutcome ?? 'done'}`, {
+          icon: waiting ? 'fa fa-hourglass-half' : 'fa fa-robot', kind: waiting ? 'wait' : 'done',
+          detail: waiting ? 'Everything that fits your rules costs well above its usual price (Channel3 90-day price history), so the agent did not buy. It looks again at the next check.' : 'When the agent last looked.',
+        });
+      }
       if (v.status === 'ACTIVE' && v.nextAgentRunAt) {
         add('agent', 'next', v.nextAgentRunAt, 'Next check', {
           kind: 'future', icon: 'fa fa-clock', action: 'agent-next',
@@ -2050,7 +2199,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const v = detailVaultForTimeline;
     if (!i?.action || !v) return false;
     if (Math.abs(newStart - i.at) < 60_000) return true;
-    const { Toast } = window.bryntum.calendar;
+    const { Toast } = window.Bryntum;
     if (newStart.getTime() < Date.now() + 5 * 60_000) { Toast.show('Pick a time in the future.'); return false; }
     const id = encodeURIComponent(v.id);
     if (i.action === 'agent-next') {
@@ -2084,17 +2233,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let detailVaultForTimeline = null;
 
-  async function renderTimeline({ fit = false } = {}) {
-    const id = tlVaultId;
-    if (!id) return;
-    const [{ Scheduler }, v] = await Promise.all([loadBryntum(), request(`/me/vaults/${encodeURIComponent(id)}`)]);
-    if (id !== tlVaultId) return;
-    detailVaultForTimeline = v;
-    const { lanes, events, info, start, end } = timelineData(v);
-    tlInfo = info;
+  // ----- Vault view: Timeline (Scheduler) · Board (TaskBoard) · Plan (Gantt) -----
+
+  const boardHost = document.getElementById('vaultBoardHost');
+  const planHost = document.getElementById('vaultPlanHost');
+  const replayBtn = document.getElementById('tlReplayBtn');
+  const runBtn = document.getElementById('tlRunBtn');
+  const tlHosts = { timeline: tlHost, board: boardHost, plan: planHost };
+  let tlView = 'timeline';
+  let tlEvents = [];       // the timeline's event configs, for Replay
+  let tlReplay = null;     // { stop } while a replay runs (live redraws wait)
+  let tlRunSince = null;   // "Run now" pressed: follow the live steps until the run ends
+  let board = null;
+  let boardInfo = new Map();
+  let plan = null;
+  let planInfo = new Map();
+  let planDragAt = null;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const hasBoard = (v) => v.type === 'SHOPPING';
+  const hasPlan = (v) => v.savingsPerPaymentCents !== null && v.savingsPerPaymentCents !== undefined;
+
+  function destroyViews() {
+    timeline?.destroy(); timeline = null;
+    board?.destroy(); board = null;
+    plan?.destroy(); plan = null;
+  }
+
+  function renderHeader(v) {
     document.getElementById('tlTitle').textContent = v.name;
     document.getElementById('tlSub').textContent = `${statusPill(v)[0]} · ${usd(v.balanceCents)} of ${usd(v.budgetCents)} · ${when(v.createdAt)} → ${when(v.expiresAt)}`;
     document.getElementById('tlLive').classList.toggle('hidden', v.status !== 'ACTIVE' && v.status !== 'SAVING');
+    const tabs = { timeline: true, board: hasBoard(v), plan: hasPlan(v) };
+    document.querySelectorAll('#tlTabs .tl-tab').forEach((t) => {
+      t.classList.toggle('hidden', !tabs[t.dataset.view]);
+      t.classList.toggle('active', t.dataset.view === tlView);
+      t.setAttribute('aria-selected', String(t.dataset.view === tlView));
+    });
+    document.getElementById('tlTabs').classList.toggle('hidden', !tabs.board && !tabs.plan);
+    for (const [k, el] of Object.entries(tlHosts)) el.classList.toggle('hidden', k !== tlView);
+    const onTimeline = tlView === 'timeline';
+    replayBtn.classList.toggle('hidden', !onTimeline);
+    runBtn.classList.toggle('hidden', !onTimeline || v.status !== 'ACTIVE' || v.type === 'SAVINGS');
+  }
+
+  async function renderTimeline({ fit = false } = {}) {
+    const id = tlVaultId;
+    if (!id || tlReplay) return;
+    const [B, v] = await Promise.all([loadBryntum(), request(`/me/vaults/${encodeURIComponent(id)}`)]);
+    if (id !== tlVaultId || tlReplay) return;
+    detailVaultForTimeline = v;
+    if (tlView === 'board' && !hasBoard(v)) tlView = 'timeline';
+    if (tlView === 'plan' && !hasPlan(v)) tlView = 'timeline';
+    renderHeader(v);
+    if (tlView === 'timeline') renderScheduler(B, v, fit);
+    else if (tlView === 'board') renderBoard(B, v);
+    else renderPlan(B, v);
+    followRun(v);
+  }
+
+  // --- Timeline (Scheduler)
+  function renderScheduler({ Scheduler }, v, fit) {
+    const { lanes, events, info, start, end } = timelineData(v);
+    tlInfo = info;
+    tlEvents = events;
     const pad = Math.max((end - start) * 0.06, 3 * 3_600_000);
     const range = { startDate: new Date(start.getTime() - pad), endDate: new Date(end.getTime() + pad) };
     if (!timeline || fit) {
@@ -2128,7 +2329,15 @@ document.addEventListener('DOMContentLoaded', () => {
           eventDragCreate: false,
           sort: false,
           timeRanges: { showCurrentTimeLine: true },
-          eventDrag: { constrainDragToResource: true, showTooltip: true },
+          eventDrag: {
+            constrainDragToResource: true,
+            showTooltip: true,
+            // What-if: what the drop would do, while dragging.
+            tooltipTemplate: ({ eventRecord, startDate }) => {
+              const i = tlInfo.get(eventRecord.id);
+              return `<b>${escapeHtml(dayText(startDate))}</b>${i?.action ? whatIfHtml(whatIf(i.action, detailVaultForTimeline, i.at, startDate)) : ''}`;
+            },
+          },
           eventTooltip: {
             template: ({ eventRecord }) => {
               const i = tlInfo.get(eventRecord.id);
@@ -2139,6 +2348,7 @@ document.addEventListener('DOMContentLoaded', () => {
         eventRenderer: ({ eventRecord }) => escapeHtml(eventRecord.name),
         listeners: {
           eventClick: ({ eventRecord }) => {
+            if (tlReplay) return;
             const i = tlInfo.get(eventRecord.id);
             tlDetails.innerHTML = i ? tlDetailsHtml(i) : tlDetailsEmpty;
           },
@@ -2163,14 +2373,314 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // --- Replay: zoom to what happened and play it back, step by step, with a moving marker.
+  async function replayTimeline() {
+    if (tlReplay) { tlReplay.stop = true; return; }
+    if (!timeline) return;
+    const steps = tlEvents
+      .filter((e) => e.resourceId !== 'vault' && !String(e.cls).includes('tl-future'))
+      .sort((x, y) => x.startDate - y.startDate);
+    const { Toast } = window.Bryntum;
+    if (!steps.length) { Toast.show('Nothing has happened in this vault yet.'); return; }
+    const run = tlReplay = { stop: false };
+    replayBtn.textContent = '■ Stop';
+    runBtn.disabled = true;
+    try {
+      timeline.eventStore.data = tlEvents.filter((e) => !steps.includes(e));
+      const first = steps[0].startDate.getTime();
+      const last = steps.at(-1).startDate.getTime();
+      const span = Math.max(last - first, 10 * 60_000);
+      timeline.zoomToSpan({ startDate: new Date(first - span * 0.15), endDate: new Date(last + span * 0.4) });
+      const [marker] = timeline.timeRangeStore?.add({ id: 'replay', name: '', startDate: new Date(first), cls: 'tl-replay-marker' }) ?? [];
+      for (let k = 0; k < steps.length && !run.stop; k++) {
+        const e = steps[k];
+        if (marker) marker.startDate = e.startDate;
+        timeline.eventStore.add(e);
+        timeline.highlightEvents({ events: [e.id], unhighlightOthers: true });
+        const i = tlInfo.get(e.id);
+        if (i) tlDetails.innerHTML = `<p class="tl-d-step">Replay · step ${k + 1} of ${steps.length}</p>${tlDetailsHtml(i)}`;
+        await sleep(k === 0 ? 600 : 1100);
+      }
+      marker?.remove();
+      if (!run.stop) tlDetails.innerHTML = `<p class="tl-d-step">Replay finished · ${steps.length} steps</p><p class="tl-d-empty">Click anything on the timeline to see it again.</p>`;
+    } finally {
+      tlReplay = null;
+      replayBtn.textContent = '▶ Replay';
+      runBtn.disabled = false;
+      await renderTimeline({ fit: true }).catch(() => {});
+    }
+  }
+
+  // --- Run now, live: start the agent and follow its steps as they land on the AI agent lane.
+  async function runAgentLive() {
+    const v = detailVaultForTimeline;
+    if (!v) return;
+    const { Toast } = window.Bryntum;
+    runBtn.disabled = true;
+    try {
+      await request(`/me/vaults/${encodeURIComponent(v.id)}/agent`, {});
+    } catch (err) {
+      Toast.show(err.message);
+      runBtn.disabled = false;
+      return;
+    }
+    tlRunSince = Date.now();
+    tlStatus.textContent = 'Agent running… watch the AI agent lane';
+    const now = Date.now();
+    timeline?.zoomToSpan({ startDate: new Date(now - 2 * 60_000), endDate: new Date(now + 10 * 60_000) });
+  }
+
+  function followRun(v) {
+    if (!tlRunSince || tlView !== 'timeline' || !timeline) return;
+    const live = timeline.eventStore.records.filter((r) => String(r.id).startsWith('agent:live:'));
+    const newest = live.at(-1);
+    if (newest) {
+      timeline.highlightEvents({ events: [newest.id], unhighlightOthers: true });
+      timeline.scrollEventIntoView(newest, { block: 'center', animate: true }).catch(() => {});
+      const i = tlInfo.get(newest.id);
+      if (i) tlDetails.innerHTML = `<p class="tl-d-step">Live · step ${live.length}</p>${tlDetailsHtml(i)}`;
+    }
+    if (v.lastAgentRunAt && new Date(v.lastAgentRunAt).getTime() >= tlRunSince - 2000) {
+      tlRunSince = null;
+      tlStatus.textContent = '';
+      runBtn.disabled = false;
+      window.Bryntum.Toast.show(`Run finished: ${OUTCOME_TEXT[v.lastAgentOutcome] ?? v.lastAgentOutcome ?? 'done'}`);
+    }
+  }
+
+  // --- Board (TaskBoard): each thing to buy as a card; cards move as the agent works.
+  const BOARD_COLUMNS = [
+    { id: 'searching', text: 'Searching' },
+    { id: 'options', text: 'Options ready' },
+    { id: 'approval', text: 'Needs you' },
+    { id: 'bought', text: 'Bought' },
+  ];
+
+  function boardData(v) {
+    const info = new Map();
+    const tasks = [];
+    const single = !(v.items ?? []).length;
+    const items = single ? [{ id: null, name: v.policy?.shopping?.product_query ?? v.name }] : v.items;
+    const spent = (v.ledger ?? []).filter((e) => e.type === 'SPEND' && e.status === 'COMPLETED');
+    for (const item of items) {
+      const prop = (v.proposals ?? []).find((p) => p.status === 'OPEN' && (single || p.itemId === item.id));
+      const dec = (v.decisions ?? []).find((d) => d.result === 'NEEDS_HUMAN' && !d.resolvedBy && (single || d.requestJson?.item_id === item.id));
+      const bought = single ? spent.length > 0 : item.bought;
+      const status = bought ? 'bought' : prop ? 'options' : dec ? 'approval' : 'searching';
+      const paid = single ? spent.reduce((n, e) => n + e.amountCents, 0) : item.spentCents;
+      const description = bought ? `Bought for ${usd(paid)}${single && spent[0]?.merchant?.name ? ` at ${spent[0].merchant.name}` : ''}`
+        : prop ? `${prop.options?.length ?? 3} options to pick from`
+        : dec ? `${usdDollars(dec.requestJson?.amount ?? 0)} at ${dec.requestJson?.merchant ?? 'a shop'} · approve?`
+        : v.status !== 'ACTIVE' ? 'Starts when the vault has its money'
+        : `Up to ${single ? usdDollars(v.policy?.rules?.max_single_transaction ?? 0) : usd(item.limitCents)}`;
+      const id = `item:${item.id ?? 'main'}`;
+      tasks.push({ id, name: item.name, description, status, eventColor: { searching: 'blue', options: 'orange', approval: 'orange', bought: 'green' }[status] });
+      info.set(id, { item, prop, dec, status, description });
+    }
+    return { tasks, info };
+  }
+
+  function renderBoard({ TaskBoard }, v) {
+    const { tasks, info } = boardData(v);
+    boardInfo = info;
+    if (!board) {
+      board = new TaskBoard({
+        appendTo: boardHost,
+        columnField: 'status',
+        columns: BOARD_COLUMNS,
+        tasks,
+        useDomTransition: true, // cards glide to their new column when the agent moves them
+        showCountInHeader: true,
+        stretchCards: false,
+        features: {
+          taskDrag: false, taskEdit: false, taskMenu: false, simpleTaskEdit: false,
+          columnDrag: false, columnHeaderMenu: false, columnToolbars: false,
+        },
+        listeners: { taskClick: ({ taskRecord }) => { tlDetails.innerHTML = boardDetailsHtml(taskRecord.id); } },
+      });
+      return;
+    }
+    // Update in place so the cards animate between columns.
+    const store = board.project.taskStore;
+    for (const t of tasks) {
+      const rec = store.getById(t.id);
+      if (rec) rec.set({ name: t.name, description: t.description, status: t.status, eventColor: t.eventColor });
+      else store.add(t);
+    }
+    for (const rec of [...store.records]) if (!tasks.some((t) => t.id === rec.id)) store.remove(rec);
+  }
+
+  function boardDetailsHtml(id) {
+    const b = boardInfo.get(id);
+    if (!b) return tlDetailsEmpty;
+    const head = `<div class="tl-d-lane"><span class="cal-tip-dot" style="background:var(--pp-blue-primary)"></span>${escapeHtml(BOARD_COLUMNS.find((c) => c.id === b.status)?.text ?? '')}</div>
+      <div class="tl-d-title">${escapeHtml(b.item.name)}</div><p class="tl-d-detail">${escapeHtml(b.description)}</p>`;
+    if (b.status === 'approval' && b.dec) {
+      const r = b.dec.requestJson ?? {};
+      return `${head}<p class="tl-d-detail">${escapeHtml(r.reason ?? '')}${r.product_url ? ` · <a href="${escapeHtml(r.product_url)}" target="_blank" rel="noopener">view product</a>` : ''}</p>
+        <p class="tl-d-detail muted">Why it asks: ${reasons(b.dec.reasons)}</p>
+        <div class="tl-d-actions"><button type="button" class="btn btn-primary-sm" data-board="approve" data-id="${b.dec.id}">Approve ${escapeHtml(usdDollars(r.amount ?? 0))}</button>
+        <button type="button" class="btn-ghost-sm" data-board="reject" data-id="${b.dec.id}">Reject</button></div>`;
+    }
+    if (b.status === 'options' && b.prop) {
+      return `${head}${b.prop.summary ? `<p class="tl-d-detail">${escapeHtml(b.prop.summary)}</p>` : ''}
+        <ul class="tl-d-options">${(b.prop.options ?? []).map((o, k) => `<li><div><a href="${escapeHtml(o.url)}" target="_blank" rel="noopener">${escapeHtml(o.title)}</a>
+          <span class="muted small">${escapeHtml(usdDollars(o.verified_price ?? o.price))} at ${escapeHtml(o.merchant)}</span></div>
+          <button type="button" class="btn-ghost-sm" data-board="pick" data-id="${b.prop.id}" data-index="${k}">Pick</button></li>`).join('')}</ul>`;
+    }
+    return head;
+  }
+
+  tlDetails.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-board]');
+    const v = detailVaultForTimeline;
+    if (!btn || !v) return;
+    const id = encodeURIComponent(v.id);
+    const { Toast } = window.Bryntum;
+    const what = btn.textContent.trim();
+    let ok = false;
+    if (btn.dataset.board === 'reject') {
+      btn.disabled = true;
+      try { await request(`/me/vaults/${id}/decisions/${btn.dataset.id}/reject`, {}); ok = true; Toast.show('Rejected. The agent will look for something else.'); }
+      catch (err) { Toast.show(err.message); }
+      btn.disabled = false;
+    } else if (btn.dataset.board === 'approve') {
+      ok = await confirmWithPassword({
+        title: 'Approve purchase', okText: 'Approve & pay',
+        html: `<div class="cal-confirm-vault">${escapeHtml(v.name)}</div><div class="cal-confirm-change"><span>The agent wants to buy</span><strong>${escapeHtml(what.replace(/^Approve /, ''))}</strong></div>`,
+        save: (password) => request(`/me/vaults/${id}/decisions/${btn.dataset.id}/approve`, { password }),
+      });
+      if (ok) Toast.show('Approved. KubePay is paying the shop.');
+    } else if (btn.dataset.board === 'pick') {
+      const title = btn.closest('li')?.querySelector('a')?.textContent ?? 'this option';
+      ok = await confirmWithPassword({
+        title: 'Pick this option', okText: 'Pick & pay',
+        html: `<div class="cal-confirm-vault">${escapeHtml(v.name)}</div><div class="cal-confirm-change"><span>You pick</span><strong>${escapeHtml(title)}</strong></div>`,
+        save: (password) => request(`/me/vaults/${id}/proposals/${btn.dataset.id}/choose`, { index: Number(btn.dataset.index), password }),
+      });
+      if (ok) Toast.show('Picked. KubePay is paying the shop.');
+    }
+    if (ok) { tlDetails.innerHTML = tlDetailsEmpty; refreshTimelineSoon(); loadVaults(); }
+  });
+
+  // --- Plan (Gantt): the savings plan as chained payments leading to the goal. Drag the next payment
+  // and the later ones follow (Gantt dependencies); saved with your password.
+  function planData(v) {
+    const info = new Map();
+    const tasks = [];
+    const deps = [];
+    const every = v.savingsEvery;
+    const add = (t, i) => { tasks.push(t); info.set(t.id, i); };
+    const paid = (v.ledger ?? []).filter((e) => e.type === 'FUND' && e.status === 'COMPLETED').sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
+    let prev = null;
+    paid.forEach((e, k) => {
+      const id = `pay:${k + 1}`;
+      const start = new Date(e.createdAt);
+      add({ id, name: `Payment ${k + 1} · ${usd(e.amountCents)}`, startDate: start, endDate: addIntervals(start, every, 1), percentDone: 100, manuallyScheduled: true, draggable: false, resizable: false, eventColor: '#0070BA', cls: 'plan-paid' },
+        { title: `Payment ${k + 1} · ${usd(e.amountCents)}`, detail: 'Paid from your PayPal.', at: start });
+      if (prev) deps.push({ id: `d:${id}`, fromTask: prev, toTask: id });
+      prev = id;
+    });
+    let nextId = null;
+    let left = v.budgetCents - v.balanceCents;
+    let at = v.status === 'SAVING' && v.nextChargeAt && !v.savings?.pausedAt ? new Date(v.nextChargeAt) : null;
+    for (let n = paid.length + 1; at && left > 0 && n <= paid.length + 60; n++) {
+      const id = `pay:${n}`;
+      const cents = Math.min(v.savingsPerPaymentCents, left);
+      const end = addIntervals(at, every, 1);
+      const first = !nextId;
+      if (first) nextId = id;
+      add({ id, name: `Payment ${n} · ${usd(cents)}`, startDate: at, duration: Math.max(1, Math.round((end - at) / 86_400_000)), durationUnit: 'day', manuallyScheduled: first, draggable: first, resizable: false, percentDone: 0, eventColor: first ? '#0070BA' : '#9AA5B1', cls: first ? 'plan-next' : 'plan-future' },
+        { title: `Payment ${n} · ${usd(cents)}`, detail: first ? 'The next payment. Drag it to move it: the later ones follow (needs your password).' : 'Planned. Moves with the payment before it.', at, action: first ? 'savings-next' : null });
+      if (prev && !first) deps.push({ id: `d:${id}`, fromTask: prev, toTask: id });
+      prev = id;
+      left -= cents;
+      at = end;
+    }
+    const reached = v.status !== 'SAVING' && v.status !== 'PENDING_FUNDING';
+    const goalAt = reached && paid.length ? new Date(paid.at(-1).createdAt) : null;
+    add({ id: 'goal', name: `Goal · ${usd(v.budgetCents)}`, ...(goalAt ? { startDate: goalAt, manuallyScheduled: true } : {}), duration: 0, draggable: false, eventColor: '#003087', cls: 'plan-goal' },
+      { title: `Goal · ${usd(v.budgetCents)}`, detail: reached ? 'Reached.' : 'Reached with the last payment.', at: goalAt });
+    if (prev && !goalAt) deps.push({ id: 'd:goal', fromTask: prev, toTask: 'goal' });
+    if (v.type === 'SHOPPING') {
+      add({ id: 'shop', name: 'Agent shops', duration: 1, durationUnit: 'day', draggable: false, resizable: false, eventColor: '#009CDE', cls: 'plan-shop' },
+        { title: 'Agent shops', detail: 'The AI agent starts shopping once the goal is reached.' });
+      deps.push({ id: 'd:shop', fromTask: 'goal', toTask: 'shop' });
+    }
+    add({ id: 'ends', name: 'Vault ends', startDate: new Date(v.expiresAt), duration: 0, manuallyScheduled: true, draggable: false, eventColor: '#003087', cls: 'plan-ends' },
+      { title: 'Vault ends', detail: 'Money left comes back to your PayPal.', at: new Date(v.expiresAt) });
+    return { tasks, deps, info, nextId };
+  }
+
+  function renderPlan({ Gantt }, v) {
+    const { tasks, deps, info, nextId } = planData(v);
+    planInfo = info;
+    plan?.destroy(); // the plan is small: rebuilt on every refresh so the engine re-chains it
+    const start = new Date(v.createdAt);
+    const end = new Date(v.expiresAt);
+    const pad = Math.max((end - start) * 0.04, 86_400_000);
+    plan = new Gantt({
+      appendTo: planHost,
+      project: { startDate: start, tasks, dependencies: deps, hoursPerDay: 24, daysPerWeek: 7, daysPerMonth: 30 },
+      startDate: new Date(start.getTime() - pad),
+      endDate: new Date(end.getTime() + pad),
+      viewPreset: timelinePreset(start, end),
+      rowHeight: 42,
+      barMargin: 9,
+      enableDeleteKey: false,
+      columns: [{ type: 'name', text: 'Savings plan', width: 210 }],
+      features: {
+        taskEdit: false, taskMenu: false, cellEdit: false, cellMenu: false, headerMenu: false, scheduleMenu: false,
+        taskResize: false, taskDragCreate: false, dependencyEdit: false, taskCopyPaste: false, rowReorder: false,
+        percentBar: false, projectLines: false, nonWorkingTime: false, timeRanges: { showCurrentTimeLine: true },
+        dependencies: { allowCreate: false },
+        taskDrag: {
+          validatorFn: (records, startDate) => { planDragAt = startDate; return records.length === 1 && records[0].id === nextId; },
+          tooltipTemplate: ({ startDate }) => `<b>${escapeHtml(dayText(startDate))}</b>${whatIfHtml(whatIf('savings-next', v, new Date(v.nextChargeAt), startDate))}`,
+        },
+      },
+      listeners: {
+        beforeTaskDrag: ({ taskRecord }) => taskRecord.id === nextId,
+        taskClick: ({ taskRecord }) => {
+          const i = planInfo.get(taskRecord.id);
+          tlDetails.innerHTML = i ? `<div class="tl-d-lane"><span class="cal-tip-dot" style="background:var(--pp-blue-primary)"></span>Savings plan</div>
+            <div class="tl-d-title">${escapeHtml(i.title)}</div>${i.at ? `<div class="tl-d-time">${escapeHtml(dayText(i.at))}</div>` : ''}
+            <p class="tl-d-detail">${escapeHtml(i.detail)}</p>` : tlDetailsEmpty;
+        },
+        beforeTaskDropFinalize: ({ context }) => {
+          context.async = true;
+          const newAt = planDragAt;
+          const oldAt = new Date(v.nextChargeAt);
+          const w = whatIf('savings-next', v, oldAt, newAt);
+          const go = !w.ok ? Promise.resolve(false).then((x) => { window.Bryntum.Toast.show(w.text); return x; })
+            : confirmWithPassword({
+              title: 'Move savings payment', okText: 'Move payment',
+              html: `<div class="cal-confirm-vault">${escapeHtml(v.name)}</div><div class="cal-confirm-change"><span>Next payment</span><span><s>${dayText(oldAt)}</s></span><strong>${dayText(newAt)}</strong></div><p class="cal-confirm-note">${escapeHtml(w.text)}</p>`,
+              save: (password) => request(`/me/vaults/${encodeURIComponent(v.id)}/savings/next`, { at: newAt.toISOString(), password }),
+            });
+          go.catch(() => false).then((ok) => {
+            context.finalize(ok);
+            if (ok) { window.Bryntum.Toast.show('Savings payment moved. The later payments follow.'); setTimeout(() => { refreshTimelineSoon(); loadVaults(); }, 0); }
+          });
+        },
+      },
+    });
+    plan.eventStore?.on?.('beforeRemove', ({ removingAll }) => (removingAll ? undefined : false));
+    // Show the whole plan, first payment to the vault's end.
+    plan.project.commitAsync?.().then(() => plan?.zoomToFit({ leftMargin: 24, rightMargin: 48 })).catch(() => {});
+  }
+
   function refreshTimelineSoon() {
     if (!tlVaultId) return;
     clearTimeout(tlRefreshTimer);
-    tlRefreshTimer = setTimeout(() => renderTimeline().catch(() => {}), 400);
+    tlRefreshTimer = setTimeout(() => renderTimeline({ fit: tlView === 'plan' }).catch(() => {}), 400);
   }
 
-  async function openVaultTimeline(vaultId) {
+  async function openVaultTimeline(vaultId, focusEventId = null) {
+    destroyViews();
     tlVaultId = vaultId;
+    tlView = 'timeline';
+    tlRunSince = null;
     tlOverlay.classList.remove('hidden');
     document.body.classList.add('cal-open');
     tlDetails.innerHTML = tlDetailsEmpty;
@@ -2178,19 +2688,154 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await renderTimeline({ fit: true });
       tlStatus.textContent = '';
+      if (focusEventId) focusTimelineEvent(focusEventId);
     } catch (err) {
       tlStatus.textContent = `Could not load the timeline: ${err.message}`;
     }
   }
 
-  function closeVaultTimeline() {
-    tlVaultId = null;
-    tlOverlay.classList.add('hidden');
-    document.body.classList.remove('cal-open');
-    timeline?.destroy();
-    timeline = null;
+  /** Scrolls the timeline to one event, highlights it and shows its details. */
+  function focusTimelineEvent(eventId) {
+    const record = timeline?.eventStore?.getById(eventId);
+    const i = tlInfo.get(eventId);
+    if (!record) return;
+    timeline.scrollEventIntoView(record, { animate: true, highlight: true, block: 'center' }).catch(() => {});
+    if (i) tlDetails.innerHTML = tlDetailsHtml(i);
   }
 
+  function closeVaultTimeline() {
+    if (tlReplay) tlReplay.stop = true;
+    tlVaultId = null;
+    tlRunSince = null;
+    tlOverlay.classList.add('hidden');
+    document.body.classList.remove('cal-open');
+    destroyViews();
+  }
+
+  // ---------- All activity: statement across every vault (AG Grid Community) ----------
+  // Same AG Grid bundle as the business dashboard, loaded only when the statement opens.
+  const stOverlay = document.getElementById('activityStatement');
+  const stStatus = document.getElementById('stStatus');
+  let stGrid = null;
+  let stType = '';
+  let agGridReady = null;
+
+  function loadAgGrid() {
+    agGridReady ??= loadScript('/vendor/ag-grid.js').then(() => {
+      if (!window.agGrid?.createGrid) throw new Error('AG Grid did not load.');
+      return window.agGrid;
+    }).catch((err) => { agGridReady = null; throw err; });
+    return agGridReady;
+  }
+
+  const ST_TYPE = { FUND: 'Money in', SPEND: 'AI purchase', LIQUIDATE: 'Refund' };
+  const ST_STATUS = { COMPLETED: ['Completed', 'ok'], PENDING: ['Pending', 'wait'], FAILED: ['Failed', 'bad'] };
+
+  function stDescription(r) {
+    if (r.type === 'SPEND') return r.note || `Paid to ${r.merchant ?? 'a shop'}`;
+    if (r.type === 'LIQUIDATE') return 'Leftover money back to your PayPal';
+    if (/^Paid by (\S+)/.test(r.note ?? '')) return r.note.replace(/ \(PayPal money request\)/, '');
+    return r.note || 'Added from your PayPal';
+  }
+
+  function stTotals() {
+    if (!stGrid) return;
+    let count = 0;
+    let net = 0;
+    stGrid.forEachNodeAfterFilter((n) => { if (n.data?.status !== 'FAILED') net += n.data.amount; count += 1; });
+    stGrid.setGridOption('pinnedBottomRowData', count ? [{ id: '__total', __total: true, description: `${count} transactions · net`, amount: net }] : []);
+    stStatus.textContent = '';
+  }
+
+  async function openActivity() {
+    stOverlay.classList.remove('hidden');
+    document.body.classList.add('cal-open');
+    stStatus.textContent = 'Loading…';
+    try {
+      const [{ createGrid, themeQuartz }, rows] = await Promise.all([loadAgGrid(), request('/me/activity')]);
+      const data = rows.map((r) => ({ ...r, amount: r.amountCents / 100, kind: ST_TYPE[r.type] ?? r.type, description: stDescription(r) }));
+      if (!stGrid) {
+        stGrid = createGrid(document.getElementById('activityGrid'), {
+          theme: themeQuartz.withParams({ accentColor: '#0070BA', fontFamily: "'Inter', -apple-system, sans-serif", fontSize: 13, headerBackgroundColor: '#F5F7FA', borderColor: '#E5E7EB', rowHoverColor: '#EBF5FB', wrapperBorderRadius: 12 }),
+          rowData: data,
+          getRowId: (p) => p.data.id,
+          defaultColDef: { sortable: true, resizable: true, filter: true },
+          columnDefs: [
+            {
+              field: 'at', headerName: 'Date', width: 160, sort: 'desc', filter: 'agDateColumnFilter',
+              valueGetter: (p) => (p.data?.at ? new Date(p.data.at) : null),
+              valueFormatter: (p) => (p.value ? when(p.value) : ''),
+              filterParams: { comparator: (day, cell) => { const d = new Date(cell.getFullYear(), cell.getMonth(), cell.getDate()); return d < day ? -1 : d > day ? 1 : 0; } },
+            },
+            { field: 'description', headerName: 'Description', flex: 2, minWidth: 220, tooltipField: 'description', cellRenderer: (p) => p.data?.__total ? `<strong>${escapeHtml(p.value)}</strong>` : escapeHtml(p.value) },
+            { field: 'vault', headerName: 'Vault', flex: 1, minWidth: 160 },
+            { field: 'kind', headerName: 'Type', width: 130 },
+            { field: 'merchant', headerName: 'Shop', width: 130, valueFormatter: (p) => p.value ?? '' },
+            {
+              field: 'amount', headerName: 'Amount', width: 130, type: 'rightAligned', filter: 'agNumberColumnFilter',
+              cellRenderer: (p) => p.value === undefined ? '' : `<span class="${p.value >= 0 ? 'st-amount-in' : 'st-amount-out'}">${p.value >= 0 ? '+' : '−'}${usd(Math.round(Math.abs(p.value) * 100))}</span>`,
+            },
+            { field: 'status', headerName: 'Status', width: 120, cellRenderer: (p) => { const s = ST_STATUS[p.value]; return s ? `<span class="st-pill ${s[1]}">${s[0]}</span>` : ''; } },
+            { field: 'paypalRef', headerName: 'PayPal ref', width: 170, hide: window.innerWidth < 1100 },
+          ],
+          isExternalFilterPresent: () => Boolean(stType),
+          doesExternalFilterPass: (node) => node.data.type === stType,
+          onFilterChanged: stTotals,
+          onRowDataUpdated: stTotals,
+          onRowClicked: (p) => {
+            if (p.data?.__total) return;
+            closeActivity();
+            openVaultTimeline(p.data.vaultId, `money:ledger:${p.data.id}`);
+          },
+          overlayNoRowsTemplate: '<span style="color:#6C7378">No activity yet. Create a vault to get started.</span>',
+          tooltipShowDelay: 400,
+        });
+      } else {
+        stGrid.setGridOption('rowData', data);
+      }
+      document.getElementById('stSub').textContent = `${rows.length} transactions across ${new Set(rows.map((r) => r.vaultId)).size} vaults`;
+      stTotals();
+    } catch (err) {
+      stStatus.textContent = `Could not load your activity: ${err.message}`;
+    }
+  }
+
+  function closeActivity() {
+    stOverlay.classList.add('hidden');
+    document.body.classList.remove('cal-open');
+  }
+
+  document.getElementById('viewAllActivityBtn')?.addEventListener('click', () => openActivity());
+  document.getElementById('closeActivityBtn').addEventListener('click', closeActivity);
+  stOverlay.addEventListener('click', (e) => { if (e.target === stOverlay) closeActivity(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !stOverlay.classList.contains('hidden')) closeActivity(); });
+  document.getElementById('stSearch').addEventListener('input', (e) => stGrid?.setGridOption('quickFilterText', e.target.value));
+  document.getElementById('stTypes').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tl-tab');
+    if (!tab) return;
+    stType = tab.dataset.type;
+    document.querySelectorAll('#stTypes .tl-tab').forEach((t) => t.classList.toggle('active', t === tab));
+    stGrid?.onFilterChanged();
+  });
+  document.getElementById('stExportBtn').addEventListener('click', () => {
+    stGrid?.exportDataAsCsv({
+      fileName: `paypal-vault-activity-${new Date().toISOString().slice(0, 10)}.csv`,
+      columnKeys: ['at', 'description', 'vault', 'kind', 'merchant', 'amount', 'status', 'paypalRef'],
+      processCellCallback: (p) => (p.column.getColId() === 'at' && p.value ? new Date(p.value).toISOString() : p.value),
+      shouldRowBeSkipped: (p) => Boolean(p.node.data?.__total),
+    });
+  });
+
+  document.getElementById('tlTabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tl-tab');
+    if (!tab || tab.dataset.view === tlView || tlReplay) return;
+    destroyViews();
+    tlView = tab.dataset.view;
+    tlDetails.innerHTML = tlDetailsEmpty;
+    renderTimeline({ fit: true }).catch((err) => { tlStatus.textContent = err.message; });
+  });
+  replayBtn.addEventListener('click', () => replayTimeline().catch(() => {}));
+  runBtn.addEventListener('click', () => runAgentLive().catch(() => {}));
   document.getElementById('closeVaultTimelineBtn').addEventListener('click', closeVaultTimeline);
   tlOverlay.addEventListener('click', (e) => { if (e.target === tlOverlay) closeVaultTimeline(); });
   document.addEventListener('keydown', (e) => {
@@ -2565,7 +3210,6 @@ document.addEventListener('DOMContentLoaded', () => {
     { id: 'manageDebitBtn', msg: 'Debit card security, pin, and lock controls' },
     { id: 'payIn4ExploreBtn', msg: 'Pay in 4: 0% APR installment plan preview' },
     { id: 'showQrCodeBtn', msg: 'Personal PayPal QR Code generated for in-store checkout' },
-    { id: 'viewAllActivityBtn', msg: 'Full statement & transaction history export' },
     { id: 'viewContactsLink', msg: 'Address book & recent transaction contacts list' },
     { id: 'addNewContactBtn', msg: 'Add new contact dialog opened' },
     { id: 'notificationsBtn', msg: '2 new notifications: "Security checkup passed", "Cashback credited"' },

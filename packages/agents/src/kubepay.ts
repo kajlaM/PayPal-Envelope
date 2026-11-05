@@ -19,6 +19,7 @@ export type VaultView = {
   type: 'SHOPPING' | 'UTILITY' | 'SAVINGS';
   status: string;
   balanceCents: number;
+  expiresAt?: string;
   policy: any;
   proposals?: { status: string; itemId: string | null; options: { url: string }[] }[];
   /** Shopping-list vaults: each item's limit now, and whether it is bought or waits for the owner. */

@@ -418,6 +418,7 @@ vaultsRouter.post('/:id/proposals/:proposalId/choose', async (req, res) => {
     product_url: option.url,
     verified_price: option.verified_price ?? undefined,
     ...(proposal.itemId ? { item_id: proposal.itemId } : {}),
+    ...(option.channel3 ? { channel3: option.channel3 } : {}),
   };
   const result = await decideAndSpend(vault, policy, request, { ownerChose: true }).catch(async (err) => {
     await reopen().catch(() => undefined);

@@ -557,3 +557,81 @@ New ways to fund a vault, buyer-protected purchases, and answering approvals fro
 - `.env.example`: notes for `SITE_URL` (also used by the email buttons) and the new `MERCHANT_PAYMENTS`.
 - Re-run `npm run setup:webhooks -w packages/paypal -- https://<tunnel>` so the platform app also receives invoice events.
 - Typecheck passes. Unit tests pass: policy 32, api 10, agents 14, audit 4, paypal 2.
+
+---
+
+## 19. Changes on 5 Nov 2026
+
+All changes are in the wallet site (`paypal-interface/`) unless a path says otherwise. The site now uses four Bryntum products: Calendar, Scheduler, Gantt and TaskBoard.
+
+### Create a vault (simpler first screen)
+- **Buy / Save** sliding switch at the top.
+  - **Buy:** Amount, Description, an **Ask me** switch, and a **Pay** row with three tiles: **Pay now**, **Pay later** (PayPal Pay in 4) and **Ask a friend** (the friend's email and message appear on the same screen).
+  - **Save:** the same fields, plus `$__ every day / week / month` (paid in over time from your own PayPal).
+- **Ask me** is an iPhone-style switch in PayPal blue. On, the AI shows its top 3 options and you pick one. Off, it runs on autopilot. It replaces the old 3-option question; the "ask above $X" setting is kept when changing an older vault, unless the switch is flipped.
+- The payment choice moved from the review step to this screen. The PayPal balance check now only runs when the money comes from your own PayPal, and the friend's email is checked here.
+- Less text: no subtitles, no hints under Amount or Description, and the Continue button just spins.
+- Review step: no subtitle, and no "Pay" or "Rules written by" rows. The yellow box only shows **real problems** (shop removed as unknown, item limits over the budget, a limit lowered, list cut to 10 items, end date shortened, a savings payment that covers everything). Notes about defaults the AI filled in are hidden.
+- **Pay later needs no site password:** PayPal's own window is the one sign-in. Pay Later can't be charged from the saved PayPal account the way Pay now is, because PayPal requires the buyer to approve it each time. No money moves until PayPal approves it. `server.ts` skips the password only for `funding: PAYLATER`.
+
+### Vault page (Manage)
+- **"AI agent"** is renamed **"Agent logs"**: a status line with a pulsing dot, and a clean log box (time, coloured dot, text: blue bought, gold needs you, red blocked).
+- **Ask me switch** (same as on the create screen) replaces "how much the AI does on its own". It sits above Agent logs, and flipping it asks for the password, with Save / Cancel.
+- **Activity** is now a tracker like an online order's status: dots joined by a line, oldest first. It covers vault created, money added, friend requests, rule changes, approvals, picks, blocked or rejected buys, payments to shops, refunds and closed/expired, followed by hollow "what's next" dots. More than 7 events fold into "Show N more events".
+
+### Vault cards
+- The type icon (shield) is removed; each card starts with its status pill.
+- Clicking the card does nothing. Only the buttons work: **Timeline** opens the timeline, **Manage** opens the vault page.
+- The status text has its own line, with Timeline and Manage below it in the same place on every card.
+- The section header shows **"✓ Connected"** instead of "✓ PayPal connected".
+
+### Bryntum: Vault calendar (Calendar)
+- A **Calendar** button next to Create opens a full-screen calendar in an Apple Calendar style with PayPal colours.
+  - **Views:** Day / Week / Month / Year.
+  - **Sidebar:** each vault is its own coloured calendar you can tick on and off, plus search.
+- **Events for every vault:** the vault's life as an all-day bar, money in and out, purchases, approvals needed, blocked buys (grouped per day), friend requests, rule changes and closed/expired. Upcoming events are faded: future savings payments, the agent's next check, and the vault's end.
+- **Drag to reschedule:** the next savings payment and "Vault ends" can be dragged (dashed outline). The drop asks for the password in a Bryntum Popup and is saved on the server; Cancel or an error snaps it back. Nothing can be deleted.
+- **What-if while dragging:** a pill by the cursor says what the drop would do, e.g. "+1 day · the agent keeps its budget until Nov 9", or in red "last payment is after the vault ends".
+- **Year view heatmap:** days are shaded by how much money moved, with a Less→More legend. Hovering a day shows "+$490 in · −$85.30 out".
+
+### Bryntum: Vault view (Timeline · Board · Plan)
+- A **Timeline** button on each vault card opens a full-screen view for that vault. A side panel shows the details of anything you click.
+- **Timeline** (Scheduler):
+  - Four lanes: **Vault** (life bar, end), **Money**, **AI agent** (buys, blocks, options, last run, next check, live steps) and **You** (approvals, picks, rule changes, friend requests).
+  - Moments are labelled milestones that stack instead of overlapping. A thin blue "now" line, hover tooltips, and live updates.
+  - Drag "Ends", the next savings payment or the agent's "Next check" (the last needs no password), with the same what-if text.
+  - **▶ Replay:** zooms to what happened and plays it back step by step with a moving marker and narration. **■ Stop** ends it. Nothing changes; it only re-shows history.
+  - **Run now:** starts the agent and follows it live. Steps land on the AI agent lane as they happen, and a toast says when the run ends.
+- **Board** (TaskBoard, shopping vaults):
+  - One card per thing to buy, in columns **Searching → Options ready → Needs you → Bought**. Cards move on their own as the agent works.
+  - Click a card to **Pick** one of the options, or **Approve / Reject** a purchase (password via the Bryntum Popup).
+- **Plan** (Gantt, savings vaults): payments chained with dependencies, leading to the Goal, then "Agent shops" for shopping vaults, then "Vault ends". Drag the next payment and the later ones follow, then save with the password.
+
+### Bryntum setup (thin packages)
+- Four products on one page need Bryntum's **thin** packages, which share one core. Installed with npm aliases, all at 7.3.7: `@bryntum/{core,engine,grid,scheduler,schedulerpro,calendar,gantt,taskboard}-thin`. The full `@bryntum/calendar-trial` package was removed.
+- `paypal-interface/bryntum/entry.js` and `entry.css` list what the site uses. `scripts/build-bryntum.mjs` bundles them with esbuild into `paypal-interface/vendor/bryntum.{js,css}` + fonts, exposed as `window.Bryntum`.
+- `npm run build:bryntum` builds the bundle. The site server also builds it on start when it's missing, and serves it at `/vendor/`. The page loads it only when a calendar or vault view opens. `paypal-interface/vendor/` is in `.gitignore`.
+- These are **trial** builds, so a "Bryntum Trial Version" watermark shows. A licence removes it.
+- `apps/web` still uses its own `@bryntum/scheduler` (a separate app, not affected).
+
+### New API routes
+| Route (site → KubePay API) | What it does | Password |
+| :--- | :--- | :--- |
+| `POST /me/vaults/:id/expiry` → `/api/vaults/:id/expiry` | Moves the vault's end. Saved as a new policy version with only the end date changed; money and pending approvals are untouched. At least 1 h from now, at most 90 days (2 years for savings), and after the last savings payment. | Yes |
+| `POST /me/vaults/:id/savings/next` → `/api/vaults/:id/savings/next` | Moves the next savings payment. The later payments keep their interval and must all fall before the vault ends (`rescheduleSavings` in `apps/api/src/services/savings.ts`). | Yes |
+| `POST /me/vaults/:id/agent/next` → `/api/vaults/:id/agent/next` | Moves the agent's next check. The vault must be active, the agent must be watching it, and the time must be before the vault ends. | No (moves no money) |
+
+- `POST /me/vaults` now refuses a request without a proper policy (`400 INVALID_POLICY`). Before, it gave a server error that exposed an internal path.
+
+### Checked
+- Typecheck passes. Unit tests pass: api 10, agents 14, audit 4, db 15, paypal 2, policy 32 (77 in total).
+- **New API routes:** every refusal case returns the right error: wrong password, dates in the past or too far ahead, closed vaults, savings payments past the vault's end, the agent not watching, unknown vault.
+- **Browser smoke test:** 20 checks passing with no page errors, across the create screen, the vault page, the calendar (all views) and the timeline on every vault.
+- **Browser, per feature:** Replay, a live agent run (45 s, 3 live steps), Board with options, Plan, the heatmap, the what-if text, and the card buttons.
+
+### Still to do before submitting (Devpost rules)
+- Add an open-source **LICENSE** file to the repo (required).
+- Make sure the GitHub repo is **public**.
+- **Demo video** under 3 minutes on YouTube.
+- **Hosted demo URL** or complete setup steps, with test logins for judges.
+- Deadline: **Nov 12, 2026, 12:00 pm Pacific.**

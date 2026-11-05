@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PayPal Business</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="business.css">
+</head>
+<body class="biz-body">
+  <!-- Business account: the same PayPal shell as the personal dashboard, with "AI agent sales" as one section
+       (like "Vaults" on the personal side). Everything else is the familiar PayPal Business home. -->
+  <div class="view-screen">
+
+    <!-- Top Global Navigation Bar -->
+    <header class="dash-navbar" role="banner">
+      <div class="dash-nav-container">
+        <div class="nav-brand-section">
+          <a href="javascript:void(0)" class="dash-logo-link" aria-label="PayPal Business Home">
+            <svg class="pp-logo-small" viewBox="0 0 34 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M26.2 7.8c-1.1-1.3-2.8-2.1-5-2.6-1.5-.3-3.3-.4-5.4-.4H3.8C2.8 4.8 2 5.6 1.8 6.6L0 34.2c-.1.8.5 1.5 1.3 1.5h6.6c.9 0 1.6-.7 1.7-1.6l1.2-8c.1-.9.9-1.6 1.8-1.6h3.4c6.8 0 12.1-2.8 13.6-10.8.6-3.4 0-6.1-2-7.9z" fill="#003087"/>
+              <path d="M28.4 13.8c-1.1-1.3-2.8-2.1-5-2.6-1.5-.3-3.3-.4-5.4-.4H6c-1 0-1.8.8-2 1.8L2.2 40.2c-.1.8.5 1.5 1.3 1.5h6.6c.9 0 1.6-.7 1.7-1.6l1.2-8c.1-.9.9-1.6 1.8-1.6h3.4c6.8 0 12.1-2.8 13.6-10.8.6-3.4 0-6.1-2-7.9z" fill="#0079C1" opacity="0.9"/>
+              <path d="M12.4 14.5c.1-.9.9-1.6 1.8-1.6h7.6c3.9 0 6.9.7 8.3 2.1 1.1 1.1 1.5 2.8 1.1 4.9-1.1 6.2-5.3 8.3-10.4 8.3H16.4c-.9 0-1.6.7-1.7 1.6l-1.3 8.3c0 .4-.4.7-.8.7H8.3c-.6 0-1-.5-.9-1.1l3.5-23.2z" fill="#00457C"/>
+            </svg>
+          </a>
+
+          <nav class="dash-primary-nav" aria-label="Primary Navigation">
+            <button type="button" class="nav-item active" data-tab="home">Home</button>
+            <button type="button" class="nav-item" data-tab="activity">Activity</button>
+            <button type="button" class="nav-item" data-tab="get-paid">Pay &amp; Get Paid</button>
+            <button type="button" class="nav-item" data-tab="ai-sales">AI agent sales</button>
+            <button type="button" class="nav-item" data-tab="reports">Reports</button>
+            <button type="button" class="nav-item" data-tab="help">Help</button>
+          </nav>
+        </div>
+
+        <div class="nav-utilities-section">
+          <span class="biz-live" id="bizLive" title="New AI-agent orders appear as they happen"><span class="biz-live-dot"></span>Live</span>
+          <button type="button" class="utility-icon-btn" id="bizNotificationsBtn" aria-label="Notifications">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </button>
+          <div class="user-profile-badge">
+            <div class="user-avatar" id="bizAvatar"></div>
+            <div class="user-meta">
+              <span class="user-name" id="bizName">…</span>
+              <span class="user-tier" id="bizEmail">Business Account</span>
+            </div>
+            <button type="button" class="btn-logout" id="bizLogout" title="Log out of PayPal">Log Out</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Sub-Navbar / Quick Actions Ribbon -->
+    <section class="quick-ribbon-bar">
+      <div class="dash-nav-container ribbon-content">
+        <div class="ribbon-greeting">
+          <h1 id="bizGreeting">Welcome</h1>
+          <span class="verified-pill">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            Verified Business
+          </span>
+        </div>
+        <div class="ribbon-actions">
+          <button type="button" class="ribbon-btn" data-demo="Send money to a supplier or contractor">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span>Send</span>
+          </button>
+          <button type="button" class="ribbon-btn" data-demo="Request a payment from a customer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Request</span>
+          </button>
+          <button type="button" class="ribbon-btn" data-demo="Create a PayPal invoice for a customer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+            <span>Create Invoice</span>
+          </button>
+          <button type="button" class="ribbon-btn ribbon-btn-accent" data-tab-link="ai-sales">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8L20 10l-5 3.6L16.5 20 12 16.4 7.5 20 9 13.6 4 10l6.1-1.2z"/></svg>
+            <span>AI agent sales</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Dashboard Container -->
+    <main class="dash-main-container">
+      <div class="dash-grid-layout">
+
+        <!-- ================= LEFT COLUMN ================= -->
+        <div class="dash-col-primary">
+
+          <!-- 1. PayPal Balance (live from the business's PayPal sandbox account) -->
+          <article class="dash-card balance-hero-card">
+            <div class="card-top-row">
+              <div class="balance-meta">
+                <span class="card-caption">PayPal Balance</span>
+                <div class="balance-amount-display">
+                  <span class="currency-symbol">$</span>
+                  <span class="balance-val" id="bizBalance">–</span>
+                  <span class="currency-code">USD</span>
+                </div>
+                <p class="balance-subtext" id="bizBalanceSub">Reading from the PayPal sandbox…</p>
+              </div>
+              <button type="button" class="biz-refresh" id="bizBalanceRefresh" title="Read the balance again" aria-label="Refresh balance">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+              </button>
+            </div>
+            <div class="balance-card-actions">
+              <button type="button" class="btn btn-primary" data-demo="Transfer your balance to your linked bank account">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                <span>Transfer Funds</span>
+              </button>
+              <button type="button" class="btn btn-outline" data-tab-link="activity">
+                <span>View Activity</span>
+              </button>
+            </div>
+          </article>
+
+          <!-- 2. Recent Activity: real payments received (from AI agents) -->
+          <article class="dash-card activity-feed-card" id="bizActivitySection">
+            <div class="section-card-header">
+              <div>
+                <h2 class="section-card-title">Recent Activity</h2>
+                <p class="section-card-desc">Payments your business received</p>
+              </div>
+              <div class="header-action-group">
+                <button type="button" class="btn-text-link" data-tab-link="ai-sales">View all</button>
+              </div>
+            </div>
+            <div class="tx-list" id="bizRecent"><p class="biz-muted biz-recent-empty">Loading…</p></div>
+          </article>
+        </div>
+
+        <!-- ================= RIGHT COLUMN ================= -->
+        <aside class="dash-col-secondary">
+
+          <!-- AI agent sales teaser (the new section, like "Vaults" on the personal side) -->
+          <article class="dash-card biz-ai-teaser">
+            <div class="promo-badge">NEW · AI AGENTS</div>
+            <h3 class="section-card-title-sm">AI agent sales</h3>
+            <p class="section-card-desc">Shopping agents buy from your shop for their customers. See every order, and every sale they could not complete.</p>
+            <div class="biz-teaser-stats">
+              <div><span class="biz-muted">This week</span><strong id="teaserWeek">–</strong></div>
+              <div><span class="biz-muted">Missed</span><strong id="teaserMissed" class="biz-warn-text">–</strong></div>
+            </div>
+            <button type="button" class="btn btn-primary-sm" data-tab-link="ai-sales">Open AI agent sales</button>
+          </article>
+
+          <!-- Get paid -->
+          <article class="dash-card">
+            <div class="section-card-header">
+              <h2 class="section-card-title-sm">Get Paid</h2>
+            </div>
+            <div class="biz-getpaid">
+              <button type="button" class="biz-getpaid-btn" data-demo="Invoices: create, send and track invoices">
+                <span class="biz-getpaid-icon">🧾</span><span>Invoices</span>
+              </button>
+              <button type="button" class="biz-getpaid-btn" data-demo="Payment links: share a link to get paid">
+                <span class="biz-getpaid-icon">🔗</span><span>Payment links</span>
+              </button>
+              <button type="button" class="biz-getpaid-btn" data-demo="QR code: take payments in person">
+                <span class="biz-getpaid-icon">▦</span><span>QR code</span>
+              </button>
+              <button type="button" class="biz-getpaid-btn" data-demo="Checkout: add PayPal buttons to your website">
+                <span class="biz-getpaid-icon">🛒</span><span>Checkout</span>
+              </button>
+            </div>
+          </article>
+
+          <!-- Seller protection -->
+          <article class="dash-card security-widget-card">
+            <h3 class="section-card-title-sm">Seller Protection</h3>
+            <p class="section-card-desc">Eligible sales are covered against claims and chargebacks. AI-agent purchases paid with PayPal Checkout include buyer and seller protection.</p>
+          </article>
+        </aside>
+      </div>
+
+      <!-- ================= AI AGENT SALES (the new section, AG Grid Community) ================= -->
+      <article class="dash-card biz-ai-section" id="aiSalesSection">
+        <div class="section-card-header">
+          <div>
+            <h2 class="section-card-title">AI agent sales</h2>
+            <p class="section-card-desc">Every payment a KubePay AI agent made to your business, and every one it wanted to make but couldn&rsquo;t. Customers are anonymised; you never see their wallets.</p>
+          </div>
+          <div class="biz-storefronts" id="bizStorefronts" aria-label="Your shop"></div>
+        </div>
+
+        <section class="biz-kpis" aria-label="Summary">
+          <article class="biz-kpi"><span class="biz-kpi-label">AI-agent revenue</span><strong id="kpiRevenue">–</strong><span class="biz-kpi-sub" id="kpiRevenueSub"></span></article>
+          <article class="biz-kpi"><span class="biz-kpi-label">Orders</span><strong id="kpiOrders">–</strong><span class="biz-kpi-sub" id="kpiOrdersSub"></span></article>
+          <article class="biz-kpi biz-kpi-warn"><span class="biz-kpi-label">Missed sales</span><strong id="kpiMissed">–</strong><span class="biz-kpi-sub" id="kpiMissedSub"></span></article>
+          <article class="biz-kpi"><span class="biz-kpi-label">Agent conversion</span><strong id="kpiConversion">–</strong><span class="biz-kpi-sub">orders ÷ attempts</span></article>
+        </section>
+
+        <section class="biz-charts" id="bizCharts" aria-label="Charts">
+          <article class="biz-chart-card">
+            <header><h3>AI-agent revenue per day</h3><span class="biz-muted" id="chartRevenueNote"></span></header>
+            <div class="biz-chart" id="chartRevenue"></div>
+          </article>
+          <article class="biz-chart-card">
+            <header><h3>Top products</h3><span class="biz-muted">by revenue</span></header>
+            <div class="biz-chart" id="chartProducts"></div>
+          </article>
+          <article class="biz-chart-card">
+            <header><h3>Agent attempts</h3><span class="biz-muted" id="chartOutcomeNote">bought vs. lost, and why</span></header>
+            <div class="biz-chart" id="chartOutcome"></div>
+          </article>
+        </section>
+
+        <section class="biz-panel">
+          <div class="biz-tabs" role="tablist">
+            <button type="button" role="tab" class="biz-tab active" data-tab="orders" aria-selected="true">AI-agent orders <span class="biz-count" id="countOrders">0</span></button>
+            <button type="button" role="tab" class="biz-tab" data-tab="missed" aria-selected="false">Missed sales <span class="biz-count biz-count-warn" id="countMissed">0</span></button>
+          </div>
+
+          <form class="biz-ask" id="bizAsk" autocomplete="off">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.8L20 10l-5 3.6L16.5 20 12 16.4 7.5 20 9 13.6 4 10l6.1-1.2z"/></svg>
+            <input type="text" id="bizAskInput" placeholder="Ask the grid… e.g. “orders this week over $40”" aria-label="Ask the grid in plain English">
+            <button type="submit" class="btn btn-primary" id="bizAskBtn">Ask</button>
+          </form>
+          <div class="biz-ask-examples" id="bizAskExamples"></div>
+          <p class="biz-ask-result hidden" id="bizAskResult" role="status"></p>
+
+          <div class="biz-insights hidden" id="bizInsights" aria-label="What agents wanted"></div>
+
+          <div class="biz-toolbar">
+            <input type="search" class="biz-search" id="bizSearch" placeholder="Quick search" aria-label="Quick search">
+            <label class="biz-group">Group by
+              <select id="bizGroupBy"></select>
+            </label>
+            <span class="biz-toolbar-spacer"></span>
+            <button type="button" class="btn btn-outline biz-small" id="bizReset">Reset view</button>
+            <button type="button" class="btn btn-outline biz-small" id="bizExport">Export CSV</button>
+          </div>
+
+          <div class="biz-grid-wrap">
+            <div id="gridOrders" class="biz-grid"></div>
+            <div id="gridMissed" class="biz-grid hidden"></div>
+            <div id="gridSummary" class="biz-grid hidden"></div>
+          </div>
+          <p class="biz-hint biz-muted" id="bizHint">Click a row to see why the agent bought it.</p>
+        </section>
+      </article>
+    </main>
+  </div>
+
+  <div class="biz-toast hidden" id="bizToast" role="status"></div>
+
+  <script src="/vendor/ag-grid.js"></script>
+  <script src="/vendor/ag-charts.js"></script>
+  <script src="business.js"></script>
+</body>
+</html>

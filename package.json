@@ -19,7 +19,8 @@
     "site:dev": "tsx watch paypal-interface/server.ts",
     "site:start": "tsx paypal-interface/server.ts",
     "tunnel": "npx -y cloudflared tunnel --url http://localhost:3000",
-    "up": "tsx scripts/up.mts"
+    "up": "tsx scripts/up.mts",
+    "build:bryntum": "node scripts/build-bryntum.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
@@ -27,6 +28,15 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@bryntum/calendar-trial": "7.3.7"
+    "@bryntum/calendar-thin": "npm:@bryntum/calendar-thin-trial@7.3.7",
+    "@bryntum/core-thin": "npm:@bryntum/core-thin-trial@7.3.7",
+    "@bryntum/engine-thin": "npm:@bryntum/engine-thin-trial@7.3.7",
+    "@bryntum/gantt-thin": "npm:@bryntum/gantt-thin-trial@7.3.7",
+    "@bryntum/grid-thin": "npm:@bryntum/grid-thin-trial@7.3.7",
+    "@bryntum/scheduler-thin": "npm:@bryntum/scheduler-thin-trial@7.3.7",
+    "@bryntum/schedulerpro-thin": "npm:@bryntum/schedulerpro-thin-trial@7.3.7",
+    "@bryntum/taskboard-thin": "npm:@bryntum/taskboard-thin-trial@7.3.7",
+    "ag-charts-community": "14.2.0",
+    "ag-grid-community": "36.2.0"
   }
 }

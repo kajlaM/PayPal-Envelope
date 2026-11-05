@@ -11,6 +11,11 @@ export type Product = {
   deliveryDays: number | null; // null when the source does not say
   categoryPath: string[]; // broad -> specific, e.g. ["Electronics", "Audio", "Headphones"]
   source: 'channel3' | 'demo-store';
+  // Channel3 only (channel3.ts uses them to compare stores and check the price history):
+  productId?: string | null; // Channel3 product id
+  image?: string | null; // product photo (background removed when Channel3 has one)
+  brand?: string | null;
+  wasPrice?: number | null; // the shop's pre-discount price
 };
 
 export type MerchantInfo = { name: string; category: string; domain: string | null };
@@ -60,7 +65,7 @@ async function searchDemoStore(query: string): Promise<Product[]> {
 const C3 = 'https://api.trychannel3.com';
 const websiteIds = new Map<string, string | null>(); // domain -> Channel3 website id (cached)
 
-async function c3(path: string, init: RequestInit = {}) {
+export async function c3(path: string, init: RequestInit = {}) {
   const res = await fetch(`${C3}${path}`, {
     ...init,
     headers: { 'x-api-key': channel3Key()!, 'content-type': 'application/json', ...init.headers },
@@ -115,8 +120,18 @@ async function searchChannel3(query: string, opts: { maxPrice: number; newOnly: 
         deliveryDays: null, // Channel3 does not report delivery time
         categoryPath: (p.category?.path ?? []).map((c: any) => c.title),
         source: 'channel3',
+        productId: p.id ?? null,
+        image: mainImage(p.images),
+        brand: p.brands?.[0]?.name ?? null,
+        wasPrice: Number(offer.price?.compare_at_price) > Number(offer.price?.price) ? Number(offer.price.compare_at_price) : null,
       });
     }
   }
   return products.filter((p) => p.price > 0);
+}
+
+/** Channel3's main photo, preferring the clean background-removed square. */
+function mainImage(images: any[] | undefined): string | null {
+  const img = images?.find((i) => i.is_main_image) ?? images?.[0];
+  return img?.cleaned_url ?? img?.url ?? null;
 }

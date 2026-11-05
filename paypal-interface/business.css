@@ -1,0 +1,224 @@
+/* PayPal Business dashboard (seller side). Builds on the tokens in styles.css. */
+
+.biz-body { background: var(--pp-gray-100); }
+.biz-muted { color: var(--pp-gray-500); }
+
+/* ---------- Top bar ---------- */
+.biz-topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 32px; background: var(--pp-white); border-bottom: 1px solid var(--pp-gray-200);
+}
+.biz-brand { display: flex; align-items: center; gap: 12px; }
+.biz-logo { width: 112px; height: 32px; }
+.biz-badge {
+  font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--pp-white); background: var(--pp-blue-deep); padding: 4px 10px; border-radius: var(--radius-pill);
+}
+.biz-account { display: flex; align-items: center; gap: 16px; }
+.biz-who { display: flex; flex-direction: column; line-height: 1.25; text-align: right; }
+.biz-who span { font-size: 12px; }
+.biz-logout { padding: 8px 16px; }
+.biz-live {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+  color: var(--pp-green); background: var(--pp-green-light); padding: 4px 10px; border-radius: var(--radius-pill);
+}
+.biz-live-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.biz-live.off { color: var(--pp-gray-500); background: var(--pp-gray-200); }
+.biz-live.pulse .biz-live-dot { animation: biz-pulse 1.2s ease-out 2; }
+@keyframes biz-pulse { 0% { box-shadow: 0 0 0 0 rgba(0,121,52,.55); } 100% { box-shadow: 0 0 0 10px rgba(0,121,52,0); } }
+
+/* ---------- Layout ---------- */
+.biz-main { max-width: 1320px; margin: 0 auto; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 20px; }
+.biz-intro { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+.biz-intro h1 { font-size: 28px; font-weight: 800; color: var(--pp-blue-deep); letter-spacing: -.01em; }
+.biz-intro p { max-width: 640px; margin-top: 4px; }
+.biz-storefronts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.biz-store {
+  font-weight: 600; color: var(--pp-blue-deep); background: var(--pp-blue-light);
+  padding: 4px 10px; border-radius: var(--radius-pill);
+}
+
+/* ---------- KPIs ---------- */
+.biz-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.biz-kpi {
+  position: relative; display: flex; flex-direction: column; gap: 4px;
+  background: var(--pp-white); border: 1px solid var(--pp-gray-200); border-radius: var(--radius-md);
+  padding: 16px 18px; box-shadow: var(--shadow-card);
+}
+.biz-kpi-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--pp-gray-500); }
+.biz-kpi strong { font-size: 26px; font-weight: 800; color: var(--pp-black); font-variant-numeric: tabular-nums; }
+.biz-kpi-sub { font-size: 12px; color: var(--pp-gray-500); overflow-wrap: anywhere; }
+.biz-kpi-warn strong { color: #B54708; }
+.biz-balance { background: linear-gradient(135deg, var(--pp-blue-deep), var(--pp-blue-primary)); border: none; }
+.biz-balance .biz-kpi-label, .biz-balance .biz-kpi-sub { color: rgba(255,255,255,.8); }
+.biz-balance strong { color: var(--pp-white); }
+.biz-refresh {
+  position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 50%;
+  border: none; cursor: pointer; display: grid; place-items: center;
+  color: var(--pp-white); background: rgba(255,255,255,.15);
+}
+.biz-refresh:hover { background: rgba(255,255,255,.28); }
+.biz-refresh.spinning svg { animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Charts strip (AG Charts Community) ---------- */
+.biz-charts { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 16px; }
+.biz-chart-card {
+  background: var(--pp-white); border: 1px solid var(--pp-gray-200); border-radius: var(--radius-md);
+  padding: 14px 16px 8px; box-shadow: var(--shadow-card); min-width: 0;
+}
+.biz-chart-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.biz-chart-card h3 { font-size: 14px; font-weight: 700; color: var(--pp-blue-deep); }
+.biz-chart-card header span { font-size: 12px; }
+.biz-chart { height: 240px; overflow: hidden; }
+
+/* ---------- Panel: tabs, ask box, toolbar ---------- */
+.biz-panel {
+  background: var(--pp-white); border: 1px solid var(--pp-gray-200); border-radius: var(--radius-lg);
+  padding: 20px 22px 16px; box-shadow: var(--shadow-card); display: flex; flex-direction: column; gap: 14px;
+}
+.biz-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--pp-gray-200); }
+.biz-tab {
+  background: none; border: none; cursor: pointer; font: inherit; font-weight: 600; font-size: 15px;
+  color: var(--pp-gray-500); padding: 10px 14px; border-bottom: 3px solid transparent; margin-bottom: -1px;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.biz-tab.active { color: var(--pp-blue-deep); border-bottom-color: var(--pp-blue-primary); }
+.biz-count { font-size: 12px; background: var(--pp-blue-light); color: var(--pp-blue-deep); padding: 1px 8px; border-radius: var(--radius-pill); }
+.biz-count-warn { background: #FEF0C7; color: #B54708; }
+
+.biz-ask {
+  display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px;
+  border: 1.5px solid var(--pp-gray-300); border-radius: var(--radius-pill); color: var(--pp-blue-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.biz-ask:focus-within { border-color: var(--pp-blue-primary); box-shadow: 0 0 0 3px rgba(0,112,186,.15); }
+.biz-ask input { flex: 1; border: none; outline: none; font: inherit; font-size: 15px; color: var(--pp-black); background: transparent; min-width: 0; }
+.biz-ask .btn { padding: 8px 20px; border-radius: var(--radius-pill); }
+.biz-ask-examples { display: flex; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
+.biz-chip {
+  font: inherit; font-size: 12px; cursor: pointer; color: var(--pp-blue-deep); background: var(--pp-gray-100);
+  border: 1px solid var(--pp-gray-200); border-radius: var(--radius-pill); padding: 4px 12px;
+}
+.biz-chip:hover { background: var(--pp-blue-light); border-color: #B3D7F0; }
+.biz-ask-result { font-size: 13px; color: var(--pp-blue-deep); background: var(--pp-blue-light); padding: 8px 12px; border-radius: var(--radius-sm); }
+.biz-ask-result.error { color: var(--pp-red); background: #FDECEA; }
+
+.biz-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.biz-search {
+  font: inherit; font-size: 14px; padding: 8px 12px; width: 240px; max-width: 100%;
+  border: 1px solid var(--pp-gray-300); border-radius: var(--radius-sm);
+}
+.biz-group { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--pp-gray-700); font-weight: 600; }
+.biz-group select { font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--pp-gray-300); border-radius: var(--radius-sm); background: var(--pp-white); }
+.biz-toolbar-spacer { flex: 1; }
+.biz-small { padding: 7px 14px; font-size: 13px; }
+
+/* ---------- Missed-sales insight cards ---------- */
+.biz-insights { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.biz-insight {
+  text-align: left; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+  background: #FFFAEB; border: 1px solid #FEDF89; border-radius: var(--radius-md); padding: 14px 16px; color: var(--pp-gray-900);
+}
+.biz-insight:hover { border-color: #F79009; }
+.biz-insight strong { font-size: 18px; color: #B54708; }
+.biz-insight span:last-child { font-size: 13px; color: var(--pp-gray-700); }
+.biz-insight-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.biz-insight-n { font-weight: 700; color: #B54708; font-size: 13px; }
+
+/* ---------- Grids ---------- */
+.biz-grid-wrap { position: relative; }
+.biz-grid { height: 560px; width: 100%; }
+.biz-hint { font-size: 12px; }
+.biz-pill { display: inline-block; font-size: 12px; font-weight: 600; line-height: 1.6; padding: 0 9px; border-radius: var(--radius-pill); }
+.biz-pill.ok { background: var(--pp-green-light); color: var(--pp-green); }
+.biz-pill.wait { background: #FEF0C7; color: #B54708; }
+.biz-pill.bad { background: #FDECEA; color: var(--pp-red); }
+.biz-pill.info { background: var(--pp-blue-light); color: var(--pp-blue-deep); }
+.biz-pill.warn { background: #FEF0C7; color: #B54708; }
+.biz-chevron { display: inline-block; font-size: 20px; font-weight: 700; color: var(--pp-gray-500); transition: transform var(--transition-fast); }
+.biz-chevron.open { transform: rotate(90deg); color: var(--pp-blue-primary); }
+.biz-grid .ag-row:not(.ag-row-pinned) { cursor: pointer; }
+.biz-row-open { background: var(--pp-blue-light) !important; }
+.biz-grid .ag-row-pinned { font-weight: 700; background: var(--pp-gray-100); }
+.biz-empty { color: var(--pp-gray-500); }
+
+.biz-detail { height: 100%; padding: 12px 20px 12px 60px; background: #F8FBFE; border-bottom: 1px solid var(--pp-gray-200); overflow: auto; }
+.biz-why { display: grid; grid-template-columns: 1.5fr 1.2fr 1fr; gap: 24px; font-size: 13px; }
+.biz-why h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--pp-gray-500); margin: 0 0 4px; }
+.biz-why p + h4 { margin-top: 10px; }
+.biz-why-col p { white-space: normal; line-height: 1.45; }
+.biz-why:has(.biz-why-wide) { grid-template-columns: 1.6fr 1fr; }
+.biz-checks { list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.biz-checks li { white-space: normal; line-height: 1.4; padding-left: 20px; position: relative; }
+.biz-checks li::before { content: '✓'; position: absolute; left: 0; color: var(--pp-green); font-weight: 700; }
+
+.biz-summary-row { cursor: pointer; }
+.biz-group-label { font-weight: 600; }
+.biz-drill { margin-left: 10px; font-size: 12px; color: var(--pp-blue-primary); font-weight: 600; }
+.biz-insight-cell { line-height: 1.45 !important; padding-top: 10px; padding-bottom: 10px; white-space: normal; }
+
+.biz-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 50;
+  background: var(--pp-navy-dark); color: var(--pp-white); padding: 12px 20px; border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg); font-size: 14px; max-width: calc(100vw - 32px);
+}
+
+/* ---------- Narrow screens ---------- */
+@media (max-width: 1100px) {
+  .biz-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .biz-balance { grid-column: 1 / -1; }
+  .biz-insights { grid-template-columns: 1fr; }
+  .biz-charts { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .biz-topbar { padding: 10px 16px; }
+  .biz-who, .biz-live { display: none; }
+  .biz-main { padding: 20px 16px 40px; }
+  .biz-why { grid-template-columns: 1fr !important; }
+  .biz-detail { padding-left: 16px; }
+  .biz-grid { height: 480px; }
+}
+
+/* ---------- PayPal Business shell (same layout classes as the personal dashboard) ---------- */
+.biz-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.balance-hero-card .biz-refresh { position: static; color: var(--pp-blue-primary); background: var(--pp-blue-light); flex: none; }
+.balance-hero-card .biz-refresh:hover { background: #D6EAF8; }
+.nav-utilities-section .biz-live { margin-right: 4px; }
+
+.biz-ai-section { margin-top: 28px; display: flex; flex-direction: column; gap: 20px; scroll-margin-top: 90px; }
+.biz-ai-section .section-card-header { align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.biz-ai-section .section-card-desc { max-width: 680px; }
+.biz-ai-section .biz-panel { box-shadow: none; padding: 0; border: none; border-radius: 0; }
+#bizActivitySection { scroll-margin-top: 90px; }
+
+.biz-ai-teaser { display: flex; flex-direction: column; gap: 10px; border: 1.5px solid #B3D7F0; background: linear-gradient(160deg, #F3F9FD, #FFFFFF 60%); }
+.biz-ai-teaser .promo-badge { align-self: flex-start; }
+.biz-teaser-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.biz-teaser-stats div { display: flex; flex-direction: column; background: var(--pp-white); border: 1px solid var(--pp-gray-200); border-radius: var(--radius-sm); padding: 8px 10px; }
+.biz-teaser-stats span { font-size: 12px; }
+.biz-teaser-stats strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.biz-warn-text { color: #B54708; }
+.biz-ai-teaser .btn-primary-sm { align-self: flex-start; }
+
+.biz-getpaid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.biz-getpaid-btn {
+  display: flex; align-items: center; gap: 10px; font: inherit; font-size: 14px; font-weight: 600; color: var(--pp-blue-deep);
+  background: var(--pp-gray-100); border: 1px solid var(--pp-gray-200); border-radius: var(--radius-md); padding: 12px; cursor: pointer; text-align: left;
+}
+.biz-getpaid-btn:hover { background: var(--pp-blue-light); border-color: #B3D7F0; }
+.biz-getpaid-icon { font-size: 18px; width: 24px; text-align: center; }
+
+.biz-tx-avatar { background: var(--pp-blue-light); color: var(--pp-blue-deep); font-size: 12px; font-weight: 700; }
+#bizRecent .tx-item { cursor: pointer; }
+.biz-recent-empty { padding: 12px 0; font-size: 14px; }
+
+@media (max-width: 1100px) {
+  .biz-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- Channel3 market columns (missed sales) ---------- */
+.biz-under { color: #B54708; font-weight: 700; }
+.biz-why.biz-why-3 { grid-template-columns: 1.2fr 1.3fr 1fr; }
+.biz-c3 { margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: #5B21B6; background: #EDE9FE; padding: 1px 6px; border-radius: 999px; text-transform: none; }

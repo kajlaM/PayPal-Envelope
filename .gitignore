@@ -4,3 +4,4 @@ dist/
 .env
 packages/db/src/generated/
 paypal-interface/data/
+paypal-interface/vendor/

@@ -1028,6 +1028,7 @@
       <header class="cal-head">
         <h2 id="calTitle" class="cal-title">Vault calendar</h2>
         <span class="cal-status" id="vaultCalendarStatus" role="status"></span>
+        <span class="cal-heat-legend" aria-hidden="true">Less <i class="cal-heat-1"></i><i class="cal-heat-2"></i><i class="cal-heat-3"></i><i class="cal-heat-4"></i> More money moved</span>
         <button type="button" class="dialog-close-btn" id="closeVaultCalendarBtn" aria-label="Close calendar">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -1044,7 +1045,14 @@
           <h2 id="tlTitle" class="cal-title">Timeline</h2>
           <p class="tl-sub" id="tlSub"></p>
         </div>
+        <div class="tl-tabs" id="tlTabs" role="tablist" aria-label="View">
+          <button type="button" role="tab" class="tl-tab active" data-view="timeline" aria-selected="true">Timeline</button>
+          <button type="button" role="tab" class="tl-tab" data-view="board" aria-selected="false">Board</button>
+          <button type="button" role="tab" class="tl-tab" data-view="plan" aria-selected="false">Plan</button>
+        </div>
         <span class="cal-status" id="tlStatus" role="status"></span>
+        <button type="button" class="btn-ghost-sm tl-action" id="tlReplayBtn" title="Replay what happened, step by step">▶ Replay</button>
+        <button type="button" class="btn btn-primary-sm tl-action" id="tlRunBtn" title="Run the AI agent now and watch it live">Run now</button>
         <span class="tl-live" id="tlLive" aria-hidden="true"><span class="live-dot on"></span>Live</span>
         <button type="button" class="dialog-close-btn" id="closeVaultTimelineBtn" aria-label="Close timeline">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1052,8 +1060,36 @@
       </header>
       <div class="tl-body">
         <div class="tl-host" id="vaultTimelineHost"></div>
+        <div class="tl-host hidden" id="vaultBoardHost"></div>
+        <div class="tl-host hidden" id="vaultPlanHost"></div>
         <aside class="tl-details" id="tlDetails" aria-live="polite"></aside>
       </div>
+    </div>
+  </div>
+
+  <!-- All activity: statement of every vault transaction (AG Grid Community). A row opens that vault's timeline. -->
+  <div class="cal-overlay hidden" id="activityStatement" role="dialog" aria-modal="true" aria-labelledby="stTitle">
+    <div class="cal-sheet">
+      <header class="cal-head st-head">
+        <div class="tl-heading">
+          <h2 id="stTitle" class="cal-title">All activity</h2>
+          <p class="tl-sub" id="stSub">Every payment in and out of your vaults</p>
+        </div>
+        <div class="tl-tabs st-types" id="stTypes" role="tablist" aria-label="Show">
+          <button type="button" class="tl-tab active" data-type="">All</button>
+          <button type="button" class="tl-tab" data-type="FUND">Money in</button>
+          <button type="button" class="tl-tab" data-type="SPEND">AI purchases</button>
+          <button type="button" class="tl-tab" data-type="LIQUIDATE">Refunds</button>
+        </div>
+        <input type="search" class="st-search" id="stSearch" placeholder="Search" aria-label="Search activity">
+        <span class="cal-status" id="stStatus" role="status"></span>
+        <button type="button" class="btn-ghost-sm" id="stExportBtn">Export CSV</button>
+        <button type="button" class="dialog-close-btn" id="closeActivityBtn" aria-label="Close activity">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </header>
+      <div class="st-host" id="activityGrid"></div>
+      <p class="st-hint">Click a row to open that vault's timeline at that moment.</p>
     </div>
   </div>
 

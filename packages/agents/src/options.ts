@@ -34,6 +34,20 @@ export function factsFor(option: Prepared, all: Prepared[], preferredKeywords: s
   const title = option.title.toLowerCase();
   const matched = preferredKeywords.filter((k) => title.includes(k.toLowerCase()));
   if (matched.length) pros.push(`Has what you prefer: ${matched.join(', ')}`);
+  // Channel3: stores compared and the 90-day price history
+  const c3 = option.channel3;
+  if (c3?.stores && c3.stores.length > 1) {
+    const dearest = c3.stores.at(-1)!;
+    if (c3.saved) pros.push(`Cheapest of ${c3.stores.length} stores ($${c3.saved.toFixed(2)} less than ${dearest.merchant})`);
+    else if (c3.stores[0]!.merchant !== option.merchant) cons.push(`Cheaper at ${c3.stores[0]!.merchant} ($${c3.stores[0]!.price.toFixed(2)})`);
+  }
+  const was = c3?.stores?.find((s) => s.merchant === option.merchant)?.was;
+  if (was && was > price(option)) pros.push(`On sale: was $${was.toFixed(2)}`);
+  if (c3?.history) {
+    const h = c3.history;
+    if (h.status === 'low') pros.push(price(option) <= h.min ? `Lowest price in ${h.days} days` : `Below its ${h.days}-day average ($${h.mean.toFixed(2)})`);
+    if (h.status === 'high') cons.push(`$${(price(option) - h.mean).toFixed(2)} above its ${h.days}-day average`);
+  }
   if (option.condition === 'used') cons.push('Used or refurbished');
   if (option.verified_price === null) cons.push('Live price could not be checked: you will be asked again before paying');
   else if (option.verified_price !== option.price) cons.push(`Price changed on the shop page (was $${option.price.toFixed(2)})`);

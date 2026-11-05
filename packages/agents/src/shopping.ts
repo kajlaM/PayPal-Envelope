@@ -7,8 +7,10 @@ import { pickCategory, rankProducts, type Candidate, type Rejected } from './ran
 import { runAgent, type AgentRun, type AgentStep } from './runner.ts';
 import { searchProducts, type MerchantInfo, type Product } from './search.ts';
 import { verifyListing } from './verify.ts';
+import { cheaperSameModel, compareStores, historyText, insightFor, shouldWaitForPrice, storesText } from './channel3.ts';
 
-export type ShoppingOutcome = 'BOUGHT' | 'NEEDS_HUMAN' | 'PROPOSED' | 'NO_MATCH';
+/** WAITING_FOR_PRICE: everything that fits is priced well above its 90-day normal (Channel3); watch mode looks again. */
+export type ShoppingOutcome = 'BOUGHT' | 'NEEDS_HUMAN' | 'PROPOSED' | 'NO_MATCH' | 'WAITING_FOR_PRICE';
 
 const OPTIONS_TO_PROPOSE = 3;
 
@@ -56,7 +58,7 @@ export async function runShoppingAgent(input: { vaultId: string; task?: string; 
   // Keep watching while any item can still be searched for; stop when all are bought or wait for the owner.
   const outcome: ShoppingOutcome =
     left.length === 0 ? 'BOUGHT'
-      : left.some((i) => !i.waiting) ? 'NO_MATCH'
+      : left.some((i) => !i.waiting) ? (runs.some((r) => r.run.outcome === 'WAITING_FOR_PRICE') ? 'WAITING_FOR_PRICE' : 'NO_MATCH')
         : left.some((i) => i.waiting === 'APPROVAL') ? 'NEEDS_HUMAN'
           : 'PROPOSED';
   return {
@@ -103,6 +105,7 @@ async function shopFor(input: {
   let outcome: ShoppingOutcome = 'NO_MATCH';
   let spent = false;
   const prepared: Prepared[] = [];
+  const priceWaits: string[] = []; // candidates passed over because Channel3 says the price is unusually high
 
   const view = (c: Candidate, i: number) => ({
     rank: i + 1, title: c.title, merchant: c.merchant, price: c.price, rating: c.rating,
@@ -127,9 +130,26 @@ async function shopFor(input: {
         const found = await searchProducts(query ?? prefs.product_query, { maxPrice: cap, newOnly: prefs.condition === 'NEW', merchants: input.merchants });
         for (const p of found) pool.set(p.url, p);
         ({ candidates: ranked, rejected } = rankProducts([...pool.values()], rankCtx));
+        // Compare stores (Channel3): the same model at a cheaper approved store wins; the dearer listing is skipped.
+        let cheaperElsewhere = 0;
+        for (const c of ranked) {
+          const cheaper = cheaperSameModel(c, ranked);
+          if (cheaper && !skipped.has(c.url)) {
+            skipped.set(c.url, `same model is cheaper at ${cheaper.merchant} ($${cheaper.price.toFixed(2)})`);
+            cheaperElsewhere++;
+          }
+        }
         const dropped: Record<string, number> = {};
         for (const r of rejected) dropped[r.reason] = (dropped[r.reason] ?? 0) + 1;
-        return { budget_cap: cap, candidates: open().slice(0, 10).map(view), dropped };
+        if (cheaperElsewhere) dropped.SAME_MODEL_CHEAPER_AT_ANOTHER_STORE = cheaperElsewhere;
+        return {
+          budget_cap: cap,
+          candidates: open().slice(0, 10).map((c, i) => {
+            const { stores } = compareStores(c, ranked);
+            return { ...view(c, i), ...(stores.length > 1 ? { compared_stores: storesText(stores) } : {}) };
+          }),
+          dropped,
+        };
       },
     }),
     skip_candidates: tool({
@@ -154,8 +174,23 @@ async function shopFor(input: {
         execute: async () => {
           if (outcome !== 'NO_MATCH') return { error: 'ALREADY_DONE', outcome };
           const next = open()[0];
-          if (!next) return { done: true, message: 'NO_CANDIDATES_LEFT' };
+          if (!next) {
+            if (priceWaits.length) outcome = 'WAITING_FOR_PRICE';
+            return { done: true, message: priceWaits.length ? 'WAITING_FOR_BETTER_PRICE' : 'NO_CANDIDATES_LEFT', waiting_for_price: priceWaits };
+          }
           tried.add(next.url);
+
+          const channel3 = await insightFor(next, [...pool.values()]);
+          if (vault.expiresAt && shouldWaitForPrice(next.price, channel3?.history, vault.expiresAt)) {
+            priceWaits.push(`${next.title} ($${next.price.toFixed(2)})`);
+            return {
+              price_high: true,
+              product: view(next, 0),
+              price_history: historyText(next.price, channel3?.history),
+              message: 'Not bought: this price is well above its 90-day normal (Channel3). Call buy_next again for the next candidate.',
+              remaining: open().length,
+            };
+          }
 
           const listing = await verifyListing(next.url).catch((err: Error) => ({ price: null, error: err.message }));
           spent = true;
@@ -167,10 +202,18 @@ async function shopFor(input: {
             product_url: next.url,
             verified_price: listing.price ?? undefined,
             ...(itemId ? { item_id: itemId } : {}),
+            ...(channel3 ? { channel3 } : {}),
           });
           if (decision.result === 'APPROVE') outcome = 'BOUGHT';
           if (decision.result === 'NEEDS_HUMAN') outcome = 'NEEDS_HUMAN';
-          return { product: view(next, 0), live_price: listing.price, decision, remaining: open().length };
+          return {
+            product: view(next, 0),
+            live_price: listing.price,
+            ...(channel3?.stores && channel3.stores.length > 1 ? { compared_stores: storesText(channel3.stores) } : {}),
+            ...(channel3?.history ? { price_history: historyText(next.price, channel3.history) } : {}),
+            decision,
+            remaining: open().length,
+          };
         },
       }),
     };
@@ -196,14 +239,21 @@ async function shopFor(input: {
               overCap.push(c.title); // the live price is above what this vault may pay
               continue;
             }
+            const channel3 = await insightFor(c, [...pool.values()]);
             prepared.push({
               title: c.title, merchant: c.merchant, price: c.price, verified_price: listing.price, url: c.url,
-              category: category(c), rating: c.rating, delivery_days: c.deliveryDays, condition: c.condition, candidate: c,
+              category: category(c), rating: c.rating, delivery_days: c.deliveryDays, condition: c.condition,
+              ...(channel3 ? { channel3 } : {}), candidate: c,
             });
           }
           if (prepared.length === 0) return { done: true, message: 'NO_CANDIDATES_LEFT', dropped_live_price_too_high: overCap };
           return {
-            options: prepared.map((p, i) => ({ ...view(p.candidate, i), live_price: p.verified_price })),
+            options: prepared.map((p, i) => ({
+              ...view(p.candidate, i),
+              live_price: p.verified_price,
+              ...(p.channel3?.stores && p.channel3.stores.length > 1 ? { compared_stores: storesText(p.channel3.stores) } : {}),
+              ...(p.channel3?.history ? { price_history: historyText(p.verified_price ?? p.price, p.channel3.history) } : {}),
+            })),
             dropped_live_price_too_high: overCap,
           };
         },
@@ -233,6 +283,7 @@ async function shopFor(input: {
         'Steps: 1) find_candidates. If the list looks like the wrong products, try one better query.',
         '2) skip_candidates (one call for all) only for items that are clearly not what the user wants.',
         `3) prepare_options. 4) propose_options once, with 1-2 short, concrete pros and cons per option that help the owner choose.`,
+        'Product data comes from Channel3: compared_stores shows the same model at each store, price_history its 90-day price. Use them in pros and cons.',
         'Finish with a 1-2 line summary for the vault owner.',
       ].join('\n')
     : [
@@ -241,8 +292,9 @@ async function shopFor(input: {
         `The user wants: ${wants}.`,
         'Steps: 1) find_candidates. If the list looks like the wrong products, try one better query.',
         '2) skip_candidates (one call for all) only for items that are clearly not what the user wants (e.g. a cable when they want headphones).',
-        '3) buy_next. If it is BLOCKed, call buy_next again for the next candidate. Stop at APPROVE, NEEDS_HUMAN, or NO_CANDIDATES_LEFT.',
-        'Finish with a 2-3 line summary for the vault owner: what was bought, or why nothing matched yet.',
+        '3) buy_next. If it is BLOCKed or says price_high, call buy_next again for the next candidate. Stop at APPROVE, NEEDS_HUMAN, NO_CANDIDATES_LEFT or WAITING_FOR_BETTER_PRICE.',
+        'Product data comes from Channel3: compared_stores shows the same model at each store, price_history its 90-day price.',
+        'Finish with a 2-3 line summary for the vault owner: what was bought (mention the stores compared and the price history when known), or why nothing was bought yet.',
       ].join('\n');
 
   const run = await runAgent({

@@ -6,16 +6,19 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import http, { type IncomingMessage } from 'node:http';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import https from 'node:https';
 import type { Duplex } from 'node:stream';
-import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { completeFunding, failFunding, prisma, startFunding } from '@kubepay/db'; // also loads the repo-root .env
 import { PayPalApiError } from '@kubepay/paypal';
 import { SAVINGS_INTERVALS, savingsExpiry, verifyApprovalLink, type ApprovalAction } from '@kubepay/policy';
-import { ACCOUNTS, type Account } from './accounts.ts';
+import { BRYNTUM_OUT, ensureBryntum } from '../scripts/build-bryntum.mjs';
+import { ACCOUNTS, BUSINESS_ACCOUNTS, type Account, type BusinessAccount } from './accounts.ts';
+import * as business from './business.ts';
+import { businessBalance } from './business-balance.ts';
 import { autoLink, chargeSavedPayPal, finishLink, getLink, LinkError, startLink, unlink, type PayPalLink } from './paypal-link.ts';
 import { balanceChanged, sandboxBalance } from './sandbox-balance.ts';
 
@@ -54,12 +57,32 @@ function readSession(req: Request): Account | null {
   return ACCOUNTS[username] ?? null;
 }
 
+// Business logins use the same signed cookie with a "biz-" prefix, so they never match a personal account.
+const BIZ_PREFIX = 'biz-';
+
+function readBusiness(req: Request): BusinessAccount | null {
+  const raw = req.headers.cookie?.split(';').map((c) => c.trim()).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
+  const [username, expiry, mac] = raw?.split('.') ?? [];
+  if (!username?.startsWith(BIZ_PREFIX) || !expiry || !mac) return null;
+  const expected = Buffer.from(sign(`${username}.${expiry}`));
+  const given = Buffer.from(mac);
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+  if (Number(expiry) < Date.now()) return null;
+  return BUSINESS_ACCOUNTS[username.slice(BIZ_PREFIX.length)] ?? null;
+}
+
+function loggedInBusiness(req: Request): BusinessAccount {
+  const biz = readBusiness(req);
+  if (!biz) throw new HttpError(401, 'NOT_LOGGED_IN');
+  return biz;
+}
+
 function setCookie(req: Request, res: Response, value: string, maxAgeMs: number) {
   const secure = req.secure ? '; Secure' : ''; // https when opened through the Cloudflare tunnel
   res.setHeader('Set-Cookie', `${COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(maxAgeMs / 1000)}${secure}`);
 }
 
-function passwordOk(account: Account, password: unknown) {
+function passwordOk(account: { password: string }, password: unknown) {
   const given = Buffer.from(String(password ?? ''));
   const expected = Buffer.from(account.password);
   return given.length === expected.length && timingSafeEqual(given, expected);
@@ -377,6 +400,12 @@ app.get('/health', async (_req, res) => {
 app.post('/auth/login', async (req, res) => {
   // Like PayPal: log in with the sandbox email, or with the short username.
   const login = String(req.body?.username ?? '').trim().toLowerCase();
+  const biz = BUSINESS_ACCOUNTS[login] ?? Object.values(BUSINESS_ACCOUNTS).find((b) => b.loginEmails.some((e) => e.toLowerCase() === login));
+  if (biz) {
+    if (!passwordOk(biz, req.body?.password)) return res.status(401).json({ error: 'INVALID_LOGIN', message: 'Wrong email/username or password.' });
+    setCookie(req, res, sessionCookie(`${BIZ_PREFIX}${biz.username}`), SESSION_MS);
+    return res.json({ kind: 'business', name: biz.name, redirect: '/business' });
+  }
   const account = ACCOUNTS[login] ?? Object.values(ACCOUNTS).find((a) => a.sandboxEmail.toLowerCase() === login);
   if (!account || !passwordOk(account, req.body?.password)) {
     return res.status(401).json({ error: 'INVALID_LOGIN', message: 'Wrong email/username or password.' });
@@ -398,6 +427,8 @@ app.post('/auth/logout', (req, res) => {
 });
 
 app.get('/auth/me', async (req, res) => {
+  const biz = readBusiness(req);
+  if (biz) return res.json({ kind: 'business', name: biz.name, redirect: '/business' });
   const account = loggedIn(req);
   await startLinkingIfNeeded(account, req, false); // e.g. still logged in from before a restart
   res.json(await profile(account));
@@ -592,6 +623,31 @@ async function createVault(account: Account, req: Request): Promise<Created> {
   }
   return created();
 }
+
+// Statement: every money movement across all of this customer's vaults (read-only, newest first).
+app.get('/me/activity', async (req, res) => {
+  const { userId } = await profile(loggedIn(req));
+  const entries = await prisma.ledgerEntry.findMany({
+    where: { vault: { userId } },
+    orderBy: { createdAt: 'desc' },
+    take: 2000,
+    include: { vault: { select: { id: true, name: true, type: true } }, merchant: { select: { name: true } } },
+  });
+  res.json(entries.map((e) => ({
+    id: e.id,
+    at: e.createdAt.toISOString(),
+    vaultId: e.vault.id,
+    vault: e.vault.name,
+    vaultType: e.vault.type,
+    type: e.type,
+    amountCents: e.type === 'FUND' ? e.amountCents : -e.amountCents, // into the vault +, out of it -
+    status: e.status,
+    merchant: e.merchant?.name ?? null,
+    paidVia: e.paidVia,
+    note: e.note,
+    paypalRef: e.paypalRef,
+  })));
+});
 
 app.get('/me/vaults/:id', async (req, res) => {
   res.json(await ownVault(loggedIn(req), req.params.id));
@@ -1035,18 +1091,65 @@ app.post('/email/act', express.urlencoded({ extended: false, limit: '8kb' }), as
   }
 });
 
+// ---------- Business dashboard (seller side): read-only ----------
+
+app.get('/biz/me', async (req, res) => {
+  const biz = loggedInBusiness(req);
+  const shops = await business.storefronts(biz);
+  res.json({ name: biz.name, username: biz.username, sandboxEmail: biz.sandboxEmail, storefronts: shops.map((s) => s.name) });
+});
+
+// Live balance of the business's PayPal sandbox account (read from sandbox.paypal.com).
+app.get('/biz/balance', async (req, res) => {
+  res.json(await businessBalance(loggedInBusiness(req), { force: req.query.fresh === '1' }));
+});
+
+app.get('/biz/orders', async (req, res) => {
+  res.json(await business.orders(loggedInBusiness(req)));
+});
+
+app.get('/biz/missed', async (req, res) => {
+  res.json(await business.missed(loggedInBusiness(req)));
+});
+
+// Channel3 market check for the missed sales: other stores' prices and the 90-day trend (loads after the grid).
+app.get('/biz/missed/market', async (req, res) => {
+  res.json(await business.missedMarket(loggedInBusiness(req)));
+});
+
+app.post('/biz/ask', async (req, res) => {
+  loggedInBusiness(req);
+  const grid = req.body?.grid === 'missed' ? 'missed' : 'orders';
+  const text = String(req.body?.text ?? '').trim().slice(0, 300);
+  if (!text) throw new HttpError(400, 'EMPTY_REQUEST');
+  try {
+    res.json(await business.ask(grid, text));
+  } catch (err) {
+    res.status(503).json({ error: 'AI_UNAVAILABLE', message: (err as Error).message });
+  }
+});
+
 // ---------- Static site ----------
 
 // Only the site's own files are public (not this server, accounts.ts or data/).
 const dir = fileURLToPath(new URL('.', import.meta.url));
-for (const file of ['index.html', 'styles.css', 'app.js']) {
-  app.get(file === 'index.html' ? ['/', '/index.html'] : `/${file}`, (_req, res) => res.sendFile(file, { root: dir }));
+for (const file of ['index.html', 'styles.css', 'app.js', 'business.html', 'business.css', 'business.js']) {
+  const urls = file === 'index.html' ? ['/', '/index.html'] : file === 'business.html' ? ['/business', '/business.html'] : [`/${file}`];
+  app.get(urls, (_req, res) => res.sendFile(file, { root: dir }));
 }
+
+// AG Grid Community + AG Charts Community (MIT, no licence key): their ready-made browser bundles,
+// served straight from node_modules. Only the business page loads them.
+const nodeRequire = createRequire(import.meta.url);
+const distOf = (pkg: string) => path.join(path.dirname(nodeRequire.resolve(pkg)), '..');
+app.get('/vendor/ag-grid.js', (_req, res) => res.sendFile('ag-grid-community.min.js', { root: distOf('ag-grid-community') }));
+app.get('/vendor/ag-charts.js', (_req, res) => res.sendFile('umd/ag-charts-community.min.js', { root: distOf('ag-charts-community') }));
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
-// Bryntum Calendar (trial build) for the vault calendar; the page loads it only when the calendar opens.
-const bryntumCalendar = dirname(createRequire(import.meta.url).resolve('@bryntum/calendar-trial/package.json'));
-app.use('/vendor/bryntum-calendar', express.static(bryntumCalendar, { index: false }));
+// Bryntum (Calendar, Scheduler, Gantt, TaskBoard as thin packages sharing one core), bundled by
+// scripts/build-bryntum.mjs. Built on start when missing; the page loads it only when a view opens.
+await ensureBryntum();
+app.use('/vendor', express.static(BRYNTUM_OUT, { index: false }));
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.code, ...err.extra });
