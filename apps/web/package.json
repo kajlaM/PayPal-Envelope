@@ -1,5 +1,5 @@
 {
-  "name": "@kubepay/web",
+  "name": "@paypalvault/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@bryntum/scheduler": "npm:@bryntum/scheduler-trial@7.3.7",
-    "@bryntum/scheduler-react": "7.3.7",
+    "@bryntum/core-enterprise": "8.0.0",
+    "@bryntum/scheduler-enterprise": "8.0.0",
+    "@bryntum/scheduler-react-enterprise": "8.0.0",
     "@paypal/react-paypal-js": "10.6.0",
     "ag-grid-community": "36.2.0",
     "ag-grid-react": "36.2.0",

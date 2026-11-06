@@ -131,7 +131,7 @@ async function searchChannel3(query: string, opts: { maxPrice: number; newOnly: 
 }
 
 /** Channel3's main photo, preferring the clean background-removed square. */
-function mainImage(images: any[] | undefined): string | null {
+export function mainImage(images: any[] | undefined): string | null {
   const img = images?.find((i) => i.is_main_image) ?? images?.[0];
   return img?.cleaned_url ?? img?.url ?? null;
 }

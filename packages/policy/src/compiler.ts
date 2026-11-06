@@ -72,7 +72,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function systemPrompt(merchants: Merchant[], now: Date, timeZone: string) {
   return [
-    'You convert a user request into a spending policy for a KubePay vault: a small, separate budget that an AI agent may spend.',
+    'You convert a user request into a spending policy for a PayPalVault vault: a small, separate budget that an AI agent may spend.',
     'Only output the fields asked for. Never invent limits the user did not state; use null instead.',
     `Current time: ${now.toISOString()} (user time zone: ${timeZone}). Turn relative dates like "before Sunday" or "in 2 days" into an exact timestamp; "before <day>" means the end of the day before it, 23:59:59 in the user time zone.`,
     `Registered merchants (name - category): ${merchants.map((m) => `${m.name} - ${m.category}`).join('; ')}.`,

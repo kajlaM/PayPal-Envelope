@@ -1,19 +1,18 @@
 // Linking a customer's PayPal sandbox account to the site, and charging it later without a popup.
 // Uses PayPal's Vault API (v3 payment tokens): the customer approves once on sandbox.paypal.com,
 // then the platform may create orders against the saved account ("vault_id"). Reuses the
-// KubePay PayPal client, so tokens, request ids and errors behave like the rest of the backend.
+// PayPalVault PayPal client, so tokens, request ids and errors behave like the rest of the backend.
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { prisma } from '@kubepay/db';
-import { platformCredentials } from '../packages/paypal/src/config.ts';
-import { paypalRequest } from '../packages/paypal/src/http.ts';
+import { prisma } from '@paypalvault/db';
+import { createPaymentToken, createPayPalSetupToken, deletePaymentToken } from '@paypalvault/paypal';
 import { ACCOUNTS, type Account } from './accounts.ts';
 import { login, withSandboxPage } from './sandbox-balance.ts';
 
 export type PayPalLink = { paymentTokenId: string; customerId: string; email: string; linkedAt: string };
 
-// ---------- Saved links (one per customer), kept in the KubePay database ----------
+// ---------- Saved links (one per customer), kept in the PayPalVault database ----------
 // The database (paypal_links, keyed by the PayPal email) lets the API charge savings payments too.
 // Links made before that lived in data/links.json; they are copied over the first time they are read.
 
@@ -68,48 +67,29 @@ export const unlink = (username: string) => saveLink(username, null);
 
 // ---------- Step 1: setup token -> customer approves on sandbox.paypal.com ----------
 
-/** POST /v3/vault/setup-tokens. Returns the PayPal page where the customer approves the link. */
-export async function startLink(urls: { returnUrl: string; cancelUrl: string }) {
-  const body = await paypalRequest(platformCredentials(), 'POST', '/v3/vault/setup-tokens', {
-    body: {
-      payment_source: {
-        paypal: {
-          usage_type: 'MERCHANT',
-          customer_type: 'CONSUMER',
-          permit_multiple_payment_tokens: true,
-          description: 'KubePay vaults: fund vaults from your PayPal account',
-          experience_context: {
-            brand_name: 'KubePay',
-            shipping_preference: 'NO_SHIPPING',
-            return_url: urls.returnUrl,
-            cancel_url: urls.cancelUrl,
-          },
-        },
-      },
-    },
+/** Vault API setup token (PayPal Server SDK). Returns the PayPal page where the customer approves the link. */
+export function startLink(urls: { returnUrl: string; cancelUrl: string }) {
+  return createPayPalSetupToken({
+    description: 'PayPalVault vaults: fund vaults from your PayPal account',
+    permitMultiplePaymentTokens: true,
+    ...urls,
   });
-  const approveUrl: string | undefined = body.links?.find((l: any) => l.rel === 'approve')?.href;
-  if (!approveUrl) throw new Error('PayPal did not return an approval link');
-  return { setupTokenId: body.id as string, approveUrl };
 }
 
 // ---------- Step 2: approved setup token -> saved payment token ----------
 
 /**
- * POST /v3/vault/payment-tokens. Only keeps the link when the approved PayPal account is the
+ * Vault API payment token (PayPal Server SDK). Only keeps the link when the approved PayPal account is the
  * customer's own sandbox account, so Jugal can never fund vaults from Kajla's PayPal.
  */
 export async function finishLink(username: string, setupTokenId: string, expectedEmail: string): Promise<PayPalLink> {
-  const token = await paypalRequest(platformCredentials(), 'POST', '/v3/vault/payment-tokens', {
-    requestId: `link-${setupTokenId}`,
-    body: { payment_source: { token: { id: setupTokenId, type: 'SETUP_TOKEN' } } },
-  });
-  const email: string = token.payment_source?.paypal?.email_address ?? '';
+  const token = await createPaymentToken(setupTokenId, `link-${setupTokenId}`);
+  const email = token.email;
   if (email.toLowerCase() !== expectedEmail.toLowerCase()) {
-    await paypalRequest(platformCredentials(), 'DELETE', `/v3/vault/payment-tokens/${token.id}`).catch(() => undefined);
+    await deletePaymentToken(token.paymentTokenId).catch(() => undefined);
     throw new LinkError(`You approved with ${email || 'another PayPal account'}. Log in to PayPal as ${expectedEmail}.`);
   }
-  const link = { paymentTokenId: token.id, customerId: token.customer?.id ?? '', email, linkedAt: new Date().toISOString() };
+  const link = { paymentTokenId: token.paymentTokenId, customerId: token.customerId, email, linkedAt: new Date().toISOString() };
   await saveLink(username, link);
   return link;
 }
@@ -150,5 +130,5 @@ export async function autoLink(account: Account, siteUrl: string): Promise<PayPa
 }
 
 // ---------- Charging the saved account ----------
-// Lives in the KubePay PayPal package, so the API can take savings payments with the same code.
-export { chargeSavedPayPal } from '../packages/paypal/src/orders.ts';
+// Lives in the PayPalVault PayPal package, so the API can take savings payments with the same code.
+export { chargeSavedPayPal } from '@paypalvault/paypal';

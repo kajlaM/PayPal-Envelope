@@ -1,7 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { z } from 'zod';
-import { LedgerError } from '@kubepay/db';
-import { PayPalApiError } from '@kubepay/paypal';
+import { LedgerError } from '@paypalvault/db';
+import { PayPalApiError } from '@paypalvault/paypal';
 
 export class HttpError extends Error {
   constructor(public status: number, public code: string, public extra: Record<string, unknown> = {}) {

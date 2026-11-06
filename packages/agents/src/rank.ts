@@ -1,4 +1,4 @@
-import { isCategoryAllowed, type ShoppingPrefs } from '@kubepay/policy';
+import { isCategoryAllowed, type ShoppingPrefs } from '@paypalvault/policy';
 import type { Product } from './search.ts';
 
 // Deterministic product filter + ranking (no AI). Hard rules drop a product; the user's weights

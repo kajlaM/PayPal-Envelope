@@ -14,7 +14,7 @@ function need(name: string): string {
   return value;
 }
 
-/** App linked to the KubePay platform business account (holds vault money). */
+/** App linked to the PayPalVault platform business account (holds vault money). */
 export const platformCredentials = (): Credentials => ({
   clientId: need('PAYPAL_CLIENT_ID'),
   clientSecret: need('PAYPAL_CLIENT_SECRET'),

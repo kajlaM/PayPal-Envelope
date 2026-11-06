@@ -1,9 +1,11 @@
 import { utilityCredentials } from './config.ts';
 import { paypalRequest } from './http.ts';
 import { money, valueToCents } from './money.ts';
+import { invoiceSchema, invoicesSchema } from 'invoices';
+import { paypalRest } from './rest-sdk.ts';
 
 // Invoicing API v2, called as the city-utility merchant.
-// The utility sends a bill to the KubePay platform; the bill-pay agent reads it;
+// The utility sends a bill to the PayPalVault platform; the bill-pay agent reads it;
 // after our payout succeeds, the utility marks it paid.
 
 export type Invoice = {
@@ -53,13 +55,15 @@ export async function sendInvoice(invoiceId: string) {
 
 /** GET /v2/invoicing/invoices */
 export async function listInvoices(): Promise<Invoice[]> {
-  const body = await paypalRequest(utilityCredentials(), 'GET', '/v2/invoicing/invoices?page_size=50&total_required=false');
+  const body = await paypalRest('utility', (c) => c.invoicesApi.invoicesList({ pageSize: 50, totalRequired: false }), invoicesSchema,
+    () => paypalRequest(utilityCredentials(), 'GET', '/v2/invoicing/invoices?page_size=50&total_required=false'));
   return (body.items ?? []).map(toInvoice);
 }
 
 /** GET /v2/invoicing/invoices/{id} */
 export async function getInvoice(invoiceId: string): Promise<Invoice> {
-  return toInvoice(await paypalRequest(utilityCredentials(), 'GET', `/v2/invoicing/invoices/${invoiceId}`));
+  return toInvoice(await paypalRest('utility', (c) => c.invoicesApi.invoicesGet({ invoiceId }), invoiceSchema,
+    () => paypalRequest(utilityCredentials(), 'GET', `/v2/invoicing/invoices/${invoiceId}`)));
 }
 
 /** POST /v2/invoicing/invoices/{id}/payments: marks the bill paid after our payout succeeded. */
@@ -70,7 +74,7 @@ export async function recordInvoicePayment(invoiceId: string, amountCents: numbe
       method: 'PAYPAL',
       payment_date: new Date().toISOString().slice(0, 10),
       amount: money(amountCents),
-      note: `Paid by KubePay (payout ${payoutRef})`,
+      note: `Paid by PayPalVault (payout ${payoutRef})`,
     },
   });
 }

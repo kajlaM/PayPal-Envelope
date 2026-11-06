@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { prisma } from '@kubepay/db';
+import { prisma } from '@paypalvault/db';
 import { HttpError } from '../http.ts';
 import { onMoneyRequestEvent } from '../services/fund-requests.ts';
 

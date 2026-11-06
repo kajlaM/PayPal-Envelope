@@ -1,6 +1,6 @@
-import { prisma } from '@kubepay/db';
-import { runVaultAgent } from '@kubepay/agents';
-import { itemProgress, listItems, PolicySchema } from '@kubepay/policy';
+import { prisma } from '@paypalvault/db';
+import { runVaultAgent } from '@paypalvault/agents';
+import { itemProgress, listItems, PolicySchema } from '@paypalvault/policy';
 import { emit } from '../events.ts';
 import { HttpError } from '../http.ts';
 import { itemSpentCents } from './policy-context.ts';

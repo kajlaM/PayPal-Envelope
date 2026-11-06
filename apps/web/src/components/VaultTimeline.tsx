@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
-import { BryntumScheduler } from '@bryntum/scheduler-react';
-import '@bryntum/scheduler/scheduler.css';
-import '@bryntum/scheduler/stockholm-light.css';
-import '@bryntum/scheduler/fontawesome/css/fontawesome.css';
-import '@bryntum/scheduler/fontawesome/css/solid.css';
+import { BryntumScheduler } from '@bryntum/scheduler-react-enterprise';
+import '@bryntum/core-enterprise/fontawesome/css/fontawesome.css';
+import '@bryntum/core-enterprise/fontawesome/css/solid.css';
+import '@bryntum/scheduler-enterprise/scheduler.css';
+import '@bryntum/scheduler-enterprise/svalbard-light.css';
 import { cents } from '../format.ts';
 import type { LedgerEntry, Vault } from '../types.ts';
 

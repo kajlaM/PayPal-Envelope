@@ -1,5 +1,5 @@
-import { completeFunding, prisma } from '@kubepay/db';
-import { captureOrder } from '@kubepay/paypal';
+import { completeFunding, prisma } from '@paypalvault/db';
+import { captureOrder } from '@paypalvault/paypal';
 import { emit } from '../events.ts';
 import { HttpError } from '../http.ts';
 import { startWatching } from './agent-runs.ts';

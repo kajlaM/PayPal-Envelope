@@ -1,6 +1,6 @@
-# KubePay AI: Implementation Guide
+# PayPalVault: Implementation Guide
 
-This guide covers how to build KubePay AI from start to finish, step by step. For each part it lists the tool to use and where it fits.
+This guide covers how to build PayPalVault from start to finish, step by step. For each part it lists the tool to use and where it fits.
 All money is **fake**. Every payment runs in the **PayPal Sandbox**, using sandbox accounts from [developer.paypal.com](https://developer.paypal.com).
 
 ---
@@ -11,16 +11,16 @@ Read this first. Every later step builds on it.
 
 | Sandbox account | Type | Plays the role of |
 | :--- | :--- | :--- |
-| `kubepay-platform@...` | Business | KubePay itself. It holds all vault money and owns the REST app. |
+| `paypalvault-platform@...` | Business | PayPalVault itself. It holds all vault money and owns the REST app. |
 | `user@...` | Personal | The end user who funds vaults and receives refunds. |
 | `audio-store@...` | Business | Merchant for the shopping vault. |
 | `city-utility@...` | Business | Merchant for the utility bill vault. It sends invoices. |
 
 ```
-User (personal)  ──Orders API (pay)──►  KubePay Platform (business)  ──Payouts API──►  Merchant (business)
+User (personal)  ──Orders API (pay)──►  PayPalVault Platform (business)  ──Payouts API──►  Merchant (business)
        ▲                                         │
        └──────────Payouts API (unused balance)───┘
-User ──Subscriptions API (monthly auto top-up)──► KubePay Platform
+User ──Subscriptions API (monthly auto top-up)──► PayPalVault Platform
 ```
 
 - **Vault** = a row in our database with a budget, a balance, and a policy. The real money sits in the platform account. Our **ledger** tracks how much belongs to each vault.
@@ -60,7 +60,7 @@ User ──Subscriptions API (monthly auto top-up)──► KubePay Platform
 | **React + Vite** | Dashboard app | 13 |
 | **AG Grid** | Vaults grid, ledger grid, live policy decision log | 13 |
 | **Bryntum Scheduler** | Timeline of vault lifetimes and expiry | 13 |
-| **Postman** | API collections for PayPal sandbox and KubePay endpoints | 14 |
+| **Postman** | API collections for PayPal sandbox and PayPalVault endpoints | 14 |
 | **Render** | Hosting for the API (Web Service), the dashboard (Static Site), the expiry sweeper (Cron Job), and Postgres | 15 |
 
 ---
@@ -71,7 +71,7 @@ Tool: **PayPal Developer Dashboard** (developer.paypal.com → log in → Sandbo
 
 1. **Create a shared developer account** for the team instead of using anyone's personal PayPal account.
 2. **Testing Tools → Sandbox Accounts:** create the 4 accounts from Step 0. Give the `user` account a large sandbox balance, for example $5,000.
-3. **Apps & Credentials → Create App** (Sandbox, merchant type), linked to `kubepay-platform`. Copy the **Client ID** and **Secret**.
+3. **Apps & Credentials → Create App** (Sandbox, merchant type), linked to `paypalvault-platform`. Copy the **Client ID** and **Secret**.
 4. In the app's **Features** section, turn on: **Payouts**, **Subscriptions**, **Invoicing**, and **Save payment methods**.
 5. Create a **second app** linked to `city-utility`. The utility merchant uses it to send invoices (Step 8).
 6. **Webhooks:** no clicking needed. `npm run setup:webhooks` registers them on both apps by API once you have a public URL (Step 9).
@@ -86,7 +86,7 @@ Sandbox base URL: `https://api-m.sandbox.paypal.com`. Review mock transactions a
 ### 3.1 Repo structure (npm workspaces, TypeScript)
 
 ```
-kubepay-ai/
+paypalvault/
 ├── apps/
 │   ├── api/            # Express server: REST + webhooks + Socket.IO
 │   ├── web/            # React + Vite dashboard
@@ -165,8 +165,8 @@ Rules for every POST:
 - Every function takes an optional `mockResponse` for negative testing.
 
 Commands:
-- `npm run smoke -w @kubepay/paypal` checks every API against the sandbox.
-- `npm run setup:plan -w @kubepay/paypal` creates the utility top-up plan once. Copy the printed id into `.env` as `PAYPAL_UTILITY_PLAN_ID`.
+- `npm run smoke -w @paypalvault/paypal` checks every API against the sandbox.
+- `npm run setup:plan -w @paypalvault/paypal` creates the utility top-up plan once. Copy the printed id into `.env` as `PAYPAL_UTILITY_PLAN_ID`.
 
 Dev helper: add the **PayPal MCP server** to your AI coding assistant (`npx -y @paypal/mcp --tools=all` with `PAYPAL_ENVIRONMENT=SANDBOX`). You can then check sandbox orders and payouts while building. Also install the **APIMatic Context Plugin** so the assistant has PayPal API context.
 
@@ -225,7 +225,7 @@ Tool: **Claude** (`claude-sonnet-5-5`, first choice) with **Gemini** as automati
    - `POST /api/vaults/compile { text }` returns `{ policy, warnings }`. Nothing is saved yet.
    - The dashboard shows the result, and the user confirms or edits it.
    - `POST /api/vaults { policy, sourceText }` then saves the vault.
-5. Test: `npm test -w @kubepay/policy` runs unit tests with no LLM. `npm run compile -w @kubepay/policy -- "your sentence"` runs it against Gemini.
+5. Test: `npm test -w @paypalvault/policy` runs unit tests with no LLM. `npm run compile -w @paypalvault/policy -- "your sentence"` runs it against Gemini.
 
 The LLM only *writes* the policy. It never *decides* whether a payment goes through.
 
@@ -356,7 +356,7 @@ Tool: **Express** route + **PayPal Webhooks API**. Webhooks are the fast path; t
 | `BILLING.SUBSCRIPTION.CANCELLED` | Unlink it: no more top-ups |
 | `INVOICING.INVOICE.PAID` / `CANCELLED` | Tell the dashboard the bill's final status |
 
-Payouts are matched by `sender_item_id` / `sender_batch_id`, which are the ledger entry id (Step 4). Events that are not KubePay's (unknown order, payout, or subscription) are stored and ignored.
+Payouts are matched by `sender_item_id` / `sender_batch_id`, which are the ledger entry id (Step 4). Events that are not PayPalVault's (unknown order, payout, or subscription) are stored and ignored.
 
 To test without real traffic, use the dashboard's **Webhooks Simulator**. Its sample events have made-up ids, so they are stored and ignored; real sandbox payments (fund a vault, run an agent) fire the real events.
 
@@ -385,7 +385,7 @@ Zapier alerts for expiry and refunds are added in Step 12.
 
 Tools: **Elasticsearch Serverless** (Elastic Cloud, GCP `us-east4`) + `@elastic/elasticsearch` + **Claude** (Gemini backup) for the Copilot. Set `ELASTIC_URL` (the project's Elasticsearch endpoint) and `ELASTIC_API_KEY`. Without them the audit is off and everything else still works.
 
-1. **Index** `kubepay-decisions` (created when the API starts): one document per decision (`decision-<id>`) and per ledger entry (`ledger-<id>`). Fields: vault, merchant, amount, category, result, reasons, invoice, timestamp, plus a plain-English `summary` (e.g. *"Blocked payment of $48.00 to Audio Store … because the amount was above the per-purchase limit (MAX_LIMIT_EXCEEDED)"*). The summary is stored twice: `text` for keyword search and `semantic_text` (Elastic makes the embeddings with ELSER).
+1. **Index** `paypalvault-audit` (created when the API starts): one document per decision (`decision-<id>`) and per ledger entry (`ledger-<id>`). Fields: vault, merchant, amount, category, result, reasons, invoice, timestamp, plus a plain-English `summary` (e.g. *"Blocked payment of $48.00 to Audio Store … because the amount was above the per-purchase limit (MAX_LIMIT_EXCEEDED)"*). The summary is stored twice: `text` for keyword search and `semantic_text` (Elastic makes the embeddings with ELSER).
 2. **Writing:** the API sends every `decision:created` / `ledger:updated` event to Elastic in the background (`apps/api/src/services/audit.ts`). Payments never wait for it or fail because of it. `POST /api/audit/reindex` (`x-internal-key`) copies everything already in Postgres.
 3. **Anomaly check** (Policy Engine soft rule `UNUSUAL_SPEND`, score ≥ 0.8 → `NEEDS_HUMAN`): Elastic aggregates the vault's past approved spends (median amount, merchants, categories).
    - 2× the median amount scores 0, 5× scores 1; a new merchant and a new category add 0.2 each.
@@ -436,7 +436,7 @@ Run: `npm run api:dev` and `npm run web:dev`, then open `http://localhost:5173`.
 | :--- | :--- |
 | Policy Engine rules (every reason code) | **node:test** unit tests (`npm test -w packages/policy`) |
 | PayPal sandbox calls (token, order, capture, payout, invoice) | **Postman** collection in `postman/`, with a sandbox environment |
-| KubePay API end-to-end (create → fund → spend → liquidate) | **Postman** collection runner |
+| PayPalVault API end-to-end (create → fund → spend → liquidate) | **Postman** collection runner |
 | Payment failures (declined capture, failed payout) | `PayPal-Mock-Response` header, e.g. `{"mock_application_codes":"INSTRUMENT_DECLINED"}` |
 | Webhook handling | PayPal Dashboard **Webhooks Simulator** + replaying the same event (should be ignored) |
 | Double spend | Fire 2 `spend` calls in parallel; only one should pass when the balance covers just one |
@@ -444,11 +444,11 @@ Run: `npm run api:dev` and `npm run web:dev`, then open `http://localhost:5173`.
 
 **Unit tests:** `npm test -w packages/<policy|paypal|agents|audit|db>`. The `db` tests use the real database (`DATABASE_URL`): each makes a throwaway user and vaults, deletes them afterwards, and makes no PayPal calls. They cover double spend (2 and 10 parallel spends), funding / subscription payments / failed payouts arriving twice, and liquidation (waits for open spends, closes an empty vault). Every check ends with `reconcile()` (balance = ledger).
 
-**Postman** (`postman/`): import both collections and the **KubePay sandbox** environment, then fill in the empty values from `.env` (`paypal_client_*`, `utility_client_*`, `merchant_email` = `AUDIO_STORE_SANDBOX_EMAIL`, `internal_key`).
+**Postman** (`postman/`): import both collections and the **PayPalVault sandbox** environment, then fill in the empty values from `.env` (`paypal_client_*`, `utility_client_*`, `merchant_email` = `AUDIO_STORE_SANDBOX_EMAIL`, `internal_key`).
 
-- **KubePay – PayPal sandbox:** token, order create/get, capture refused before approval, capture declined (`INSTRUMENT_DECLINED` mock), payout + status, same `sender_batch_id` refused, payout refused (`INSUFFICIENT_FUNDS` mock), utility invoices. Moves $1.01 platform → merchant.
-- **KubePay – API end-to-end** (API running): folder **1** creates a $20 vault and a funding order and prints the approve link → approve it as the **user** sandbox account → folder **2** captures, then tests over-limit / unknown merchant / price mismatch (BLOCK), unverified price and duplicate (NEEDS_HUMAN → rejected), a valid $5 payout, and liquidation ($15 back to the user).
-- From the command line: `npx newman run postman/<collection>.json -e postman/kubepay-sandbox.postman_environment.json --env-var internal_key=...` (add `--folder "1. Create and fund"` for the end-to-end collection). Newman forgets variables between runs, so for folder 2 also pass `--env-var vault_id=... --env-var order_id=... --env-var merchant_category=...` from folder 1's output; the Postman app keeps them by itself.
+- **PayPalVault – PayPal sandbox:** token, order create/get, capture refused before approval, capture declined (`INSTRUMENT_DECLINED` mock), payout + status, same `sender_batch_id` refused, payout refused (`INSUFFICIENT_FUNDS` mock), utility invoices. Moves $1.01 platform → merchant.
+- **PayPalVault – API end-to-end** (API running): folder **1** creates a $20 vault and a funding order and prints the approve link → approve it as the **user** sandbox account → folder **2** captures, then tests over-limit / unknown merchant / price mismatch (BLOCK), unverified price and duplicate (NEEDS_HUMAN → rejected), a valid $5 payout, and liquidation ($15 back to the user).
+- From the command line: `npx newman run postman/<collection>.json -e postman/paypalvault-sandbox.postman_environment.json --env-var internal_key=...` (add `--folder "1. Create and fund"` for the end-to-end collection). Newman forgets variables between runs, so for folder 2 also pass `--env-var vault_id=... --env-var order_id=... --env-var merchant_category=...` from folder 1's output; the Postman app keeps them by itself.
 - Webhook tests (Simulator, replay) need a public API URL, so they run after the Render deploy (Step 15).
 
 ---
@@ -459,7 +459,7 @@ Run: `npm run api:dev` and `npm run web:dev`, then open `http://localhost:5173`.
 | :--- | :--- | :--- |
 | `apps/api` | Web Service | Public URL used as PayPal webhook URL |
 | `apps/web` | Static Site | Set `VITE_API_URL` and `VITE_PAYPAL_CLIENT_ID` |
-| `apps/sweeper` | Cron Job (`* * * * *`) | Only `KUBEPAY_API_URL` (the API's Render URL) and `INTERNAL_API_KEY` (optional: the API already runs the tick itself) |
+| `apps/sweeper` | Cron Job (`* * * * *`) | Only `PAYPALVAULT_API_URL` (the API's Render URL) and `INTERNAL_API_KEY` (optional: the API already runs the tick itself) |
 | Database | Render Postgres | Run `prisma migrate deploy` on build |
 
 After deploying, update the webhook URL in the PayPal app to the Render API URL.
@@ -534,7 +534,7 @@ New ways to fund a vault, buyer-protected purchases, and answering approvals fro
 - **Never pays twice:** the ledger entry is marked `CHECKOUT` before PayPal is called, and an unclear result is only retried as the same order (ledger entry id = PayPal-Request-Id and invoice id).
 - New column `ledger_entries.paidVia` (`CHECKOUT` / `PAYOUTS`, migration `20261103130000_checkout_spends`).
 - New files: `packages/paypal/src/checkout.ts`, `apps/api/src/services/checkout.ts`, `apps/api/scripts/setup-checkout.ts`.
-- Changed: `spend.ts` (Checkout first), `payouts.ts` (skips Checkout entries), `sweeper.ts` (resumes and settles Checkout purchases), `webhooks.ts` (`PAYMENT.CAPTURE.COMPLETED` / `DENIED` for purchases), `POST /api/vaults/:id/sync`, and `packages/agents/src/kubepay.ts` (reads either payment status).
+- Changed: `spend.ts` (Checkout first), `payouts.ts` (skips Checkout entries), `sweeper.ts` (resumes and settles Checkout purchases), `webhooks.ts` (`PAYMENT.CAPTURE.COMPLETED` / `DENIED` for purchases), `POST /api/vaults/:id/sync`, and `packages/agents/src/paypalvault.ts` (reads either payment status).
 
 ### Answer from the email (two-way Zapier alerts, email only)
 - The "approval needed" email has **Approve / Reject** buttons. The "options ready" email (Ask me vaults) has **Pick 1/2/3 / None of these**.
@@ -615,7 +615,7 @@ All changes are in the wallet site (`paypal-interface/`) unless a path says othe
 - `apps/web` still uses its own `@bryntum/scheduler` (a separate app, not affected).
 
 ### New API routes
-| Route (site → KubePay API) | What it does | Password |
+| Route (site → PayPalVault API) | What it does | Password |
 | :--- | :--- | :--- |
 | `POST /me/vaults/:id/expiry` → `/api/vaults/:id/expiry` | Moves the vault's end. Saved as a new policy version with only the end date changed; money and pending approvals are untouched. At least 1 h from now, at most 90 days (2 years for savings), and after the last savings payment. | Yes |
 | `POST /me/vaults/:id/savings/next` → `/api/vaults/:id/savings/next` | Moves the next savings payment. The later payments keep their interval and must all fall before the vault ends (`rescheduleSavings` in `apps/api/src/services/savings.ts`). | Yes |
@@ -635,3 +635,35 @@ All changes are in the wallet site (`paypal-interface/`) unless a path says othe
 - **Demo video** under 3 minutes on YouTube.
 - **Hosted demo URL** or complete setup steps, with test logins for judges.
 - Deadline: **Nov 12, 2026, 12:00 pm Pacific.**
+
+---
+
+## Verified by PayPal (read-only reconciliation)
+
+All vault money sits in one PayPal account; the split into vaults is our ledger. `apps/api/src/services/verify.ts`
+asks PayPal about every ledger entry (Orders, Payments, Payouts, Invoicing; read-only) and labels it
+`VERIFIED`, `WAITING`, `MISMATCH` or `UNCHECKED`, with PayPal's transaction id. It runs every night
+(`VERIFY_HOUR`, default 3 AM in `ALERT_TIMEZONE`) and from the **Verify now** button
+(`POST /api/vaults/:id/verify`). Badges show on vault cards, the vault's activity, the activity table and the
+seller dashboard; a mismatch sends an alert email. It never moves money and never changes the ledger.
+
+## API description and APIMatic (private)
+
+- `npm run openapi -w @paypalvault/api` writes the OpenAPI 3.1 description of the PayPalVault API
+  (`apps/api/openapi/paypalvault.openapi.json`), built from the same zod schemas the routes validate with
+  (`apps/api/src/api-schemas.ts`). A test checks it lists exactly the routes the API serves and marks exactly the
+  routes that need the internal key.
+- PayPal's own SDK calls (Orders, Payments, Vault, Subscriptions) go through the APIMatic-generated
+  PayPal Server SDK (`packages/paypal/src/sdk.ts`); its errors come out as `PayPalApiError` like the REST client's.
+- APIMatic (needs `npx @apimatic/cli@2.2.0 auth login` once): `npm run apimatic -- sdk | portal | serve | paypal-sdk`.
+  - `packages/vault-sdk` (`pay-pal-vault-api`): the PayPalVault SDK. The site (`paypal-interface/vault-api.ts`) and the agent
+    (`packages/agents/src/paypalvault.ts`) call the API only through it. The agent's file exposes just four calls
+    (read a vault, list shops, ask to buy, propose options): it has no call that pays, approves, refunds or closes.
+  - `packages/paypal-rest-sdk` (`invoices`): generated from PayPal's own published descriptions (`apimatic/paypal/original`).
+    Payouts, invoice/money-request reads and webhook management go through it (`packages/paypal/src/rest-sdk.ts`).
+    Invoice and money-request writes stay on the REST client because they must send `PayPal-Request-Id`, which PayPal's
+    Invoicing description lacks; the webhook signature check stays there because it must send PayPal's bytes verbatim.
+  - The SDKs' models are camelCase; requests and responses are converted with the SDKs' own schemas, so the JSON on the
+    wire is unchanged (checked on every stored vault, policy, purchase request and payout batch).
+  - The portal is static files on this machine (`apimatic/vault/portal`, not committed); nothing is published, and its
+    "open in an AI assistant" page actions are off.

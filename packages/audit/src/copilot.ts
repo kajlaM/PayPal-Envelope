@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { policyModels } from '@kubepay/policy';
+import { policyModels } from '@paypalvault/policy';
 import { searchAudit, type AuditHit } from './store.ts';
 
 // Audit Copilot: answers questions about spending using only the audit records it finds.
@@ -12,7 +12,7 @@ export async function askAudit(question: string, opts: { vaultId?: string } = {}
 
   const records = sources.map((s) => `[${s.id}] ${s.timestamp}: ${s.summary}`).join('\n');
   const system = [
-    'You are the KubePay Audit Copilot. Answer the vault owner in 2-4 short, plain sentences.',
+    'You are the PayPalVault Audit Copilot. Answer the vault owner in 2-4 short, plain sentences.',
     'Use ONLY the audit records below. If they do not answer the question, say so.',
     'Cite the records you used by their id in square brackets, e.g. [decision-abc].',
     `Audit records (most relevant first):\n${records}`,

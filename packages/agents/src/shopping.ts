@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { controlMode, itemPrefs, ShoppingPrefsSchema, type ControlMode, type ShoppingItem, type ShoppingPrefs } from '@kubepay/policy';
-import { getVault, listMerchants, proposeOptions, requestPurchase, type VaultView } from './kubepay.ts';
+import { controlMode, itemPrefs, ShoppingPrefsSchema, type ControlMode, type ShoppingItem, type ShoppingPrefs } from '@paypalvault/policy';
+import { getVault, listMerchants, proposeOptions, requestPurchase, type VaultView } from './paypalvault.ts';
 import { sameListing, withProsAndCons, type Prepared } from './options.ts';
 import { pickCategory, rankProducts, type Candidate, type Rejected } from './rank.ts';
 import { runAgent, type AgentRun, type AgentStep } from './runner.ts';
@@ -169,7 +169,7 @@ async function shopFor(input: {
     return {
       buy_next: tool({
         description:
-          'Verify the live price of the best remaining candidate and ask KubePay to buy it. If BLOCKed, call again to try the next one.',
+          'Verify the live price of the best remaining candidate and ask PayPalVault to buy it. If BLOCKed, call again to try the next one.',
         inputSchema: z.object({}),
         execute: async () => {
           if (outcome !== 'NO_MATCH') return { error: 'ALREADY_DONE', outcome };
@@ -277,7 +277,7 @@ async function shopFor(input: {
   const wants = `${prefs.product_query}${itemId ? ` (shopping-list item "${input.itemName}", max $${cap.toFixed(2)})` : ''}`;
   const system = askMe
     ? [
-        'You are the KubePay shopping agent. In this vault the owner picks every purchase: you never buy.',
+        'You are the PayPalVault shopping agent. In this vault the owner picks every purchase: you never buy.',
         `Vault "${vault.name}": you may suggest products up to $${cap.toFixed(2)}.`,
         `The user wants: ${wants}.`,
         'Steps: 1) find_candidates. If the list looks like the wrong products, try one better query.',
@@ -287,7 +287,7 @@ async function shopFor(input: {
         'Finish with a 1-2 line summary for the vault owner.',
       ].join('\n')
     : [
-        'You are the KubePay shopping agent. You spend from one vault, and only through buy_next.',
+        'You are the PayPalVault shopping agent. You spend from one vault, and only through buy_next.',
         `Vault "${vault.name}": balance $${(vault.balanceCents / 100).toFixed(2)}, max $${cap.toFixed(2)} for this purchase.`,
         `The user wants: ${wants}.`,
         'Steps: 1) find_candidates. If the list looks like the wrong products, try one better query.',

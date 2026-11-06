@@ -134,6 +134,8 @@ export const Channel3InsightSchema = z.object({
     min: z.number(),
     max: z.number(),
     days: z.number().int(),
+    // The daily prices behind it, oldest first: [YYYY-MM-DD, dollars]. Drawn as a chart on the site.
+    points: z.array(z.tuple([z.string().max(10), z.number().nonnegative()])).max(120).optional(),
   }).nullable().optional(),
 });
 export type Channel3Insight = z.infer<typeof Channel3InsightSchema>;

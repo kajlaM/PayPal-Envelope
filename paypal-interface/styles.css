@@ -2255,7 +2255,7 @@ body {
 }
 
 /* ==========================================================================
-   Live vaults: create flow, PayPal link, vault detail (KubePay backend)
+   Live vaults: create flow, PayPal link, vault detail (PayPalVault backend)
    ========================================================================== */
 .muted { color: var(--pp-gray-500); }
 .small { font-size: 0.78rem; }
@@ -3287,3 +3287,40 @@ body.cal-open { overflow: hidden; }
 .c3-stores li.is-pick { background: var(--pp-blue-light); color: var(--pp-blue-deep); font-weight: 700; }
 .c3-stores s { color: var(--pp-gray-500); font-weight: 400; margin-left: 4px; }
 .c3-tag { display: inline-block; vertical-align: middle; margin-left: 6px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em; color: #5B21B6; background: #EDE9FE; padding: 2px 8px; border-radius: 999px; }
+
+/* ---------- Channel3: price chart, approval product block, savings, product-link lookup ---------- */
+.c3-chart { width: 100%; height: 132px; min-width: 0; }
+.c3-saved { align-self: flex-start; font-size: 0.75rem; font-weight: 600; color: var(--pp-green); }
+
+.vd-approval.has-c3 { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); align-items: start; }
+.vd-approval.has-c3 > .vd-approval-actions { grid-column: 1 / -1; }
+.vd-approval-c3 { display: flex; flex-direction: column; gap: 6px; }
+.vd-approval-c3 ul.c3-stores { list-style: none; margin: 0; padding: 0; border: 1px solid var(--pp-gray-200); border-radius: var(--radius-sm); overflow: hidden; }
+@media (max-width: 640px) { .vd-approval.has-c3 { grid-template-columns: minmax(0, 1fr); } }
+
+.vault-c3-saved { margin-top: 8px; font-size: 0.78rem; font-weight: 600; color: var(--pp-green); }
+.c3-total { font-size: 0.78rem; font-weight: 700; color: var(--pp-green); background: var(--pp-green-light); padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+
+.form-label-note { font-weight: 400; color: var(--pp-gray-500); font-size: 0.8em; margin-left: 4px; }
+.link-lookup-row { display: flex; gap: 8px; }
+.link-lookup-row .form-input { flex: 1; min-width: 0; }
+.link-lookup-row .btn { flex: none; }
+.vault-link-result { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--pp-gray-200); border-radius: var(--radius-sm); background: #fff; }
+.vault-link-result ul.c3-stores { list-style: none; margin: 0; padding: 0; border: 1px solid var(--pp-gray-200); border-radius: var(--radius-sm); overflow: hidden; }
+.vault-link-result p { margin: 0; }
+.link-product { display: flex; gap: 12px; align-items: flex-start; }
+.link-product .c3-photo { width: 84px; height: 84px; flex: none; }
+.link-product-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.link-product-info strong { font-size: 0.9rem; line-height: 1.3; }
+
+/* ---------- Verified by PayPal (read-only check of every payment against PayPal's records) ---------- */
+.pp-check { display: inline-block; vertical-align: middle; margin-left: 6px; font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.pp-check-ok { background: var(--pp-green-light); color: var(--pp-green); }
+.pp-check-wait { background: #FEF0C7; color: #B54708; }
+.pp-check-bad { background: #FDECEA; color: var(--pp-red); }
+.track-sub code { font-size: 0.72rem; background: var(--pp-gray-100); padding: 0 4px; border-radius: 4px; }
+.pp-summary { margin: 0 0 6px; font-weight: 600; }
+.pp-summary-ok { color: var(--pp-green); }
+.pp-summary-wait { color: #B54708; }
+.pp-summary-bad { color: var(--pp-red); }
+.vault-pp-check { margin-top: 8px; font-size: 0.78rem; font-weight: 600; }

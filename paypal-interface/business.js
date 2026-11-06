@@ -78,6 +78,7 @@
 
   // ---------- Grid definitions ----------
   const STATUS_CLASS = { Paid: 'ok', Pending: 'wait', Failed: 'bad' };
+  const PAYPAL_CLASS = { Confirmed: 'ok', Processing: 'wait', Differs: 'bad', 'Not checked': 'info' };
   const APPROVAL_CLASS = { Autopilot: 'info', 'Picked by customer': 'ok', 'Approved by customer': 'ok' };
 
   const GRIDS = {
@@ -96,6 +97,7 @@
         { field: 'paidVia', headerName: 'Paid via', width: 135, filter: 'agTextColumnFilter' },
         { field: 'approval', headerName: 'How approved', width: 160, filter: 'agTextColumnFilter', cellRenderer: pill((v) => APPROVAL_CLASS[v] ?? 'info') },
         { field: 'status', headerName: 'Status', width: 100, filter: 'agTextColumnFilter', cellRenderer: pill((v) => STATUS_CLASS[v] ?? 'info'), enableCellChangeFlash: true },
+        { field: 'paypal', headerName: 'PayPal check', width: 125, filter: 'agTextColumnFilter', cellRenderer: pill((v) => PAYPAL_CLASS[v] ?? 'info'), tooltipField: 'paypalNote', headerTooltip: 'Checked against PayPal\'s own records (read-only)' },
         { field: 'customer', headerName: 'Customer', width: 125, filter: 'agTextColumnFilter' },
       ],
       detailHeight: 168,
@@ -114,6 +116,7 @@
           <div class="biz-why-col">
             <h4>Payment</h4>
             <p>${escapeHtml(r.paidVia)} · ${escapeHtml(r.status)}</p>
+            <p>${r.paypal === 'Confirmed' ? '✅' : r.paypal === 'Differs' ? '⚠️' : r.paypal === 'Processing' ? '⏳' : '·'} ${escapeHtml(r.paypalNote)}</p>
             <p class="biz-muted">PayPal ref ${escapeHtml(r.paypalRef || '–')}</p>
           </div>
         </div>`,
@@ -178,7 +181,7 @@
     if (/another option/.test(r.reason) && m && m.marketLow < r.amount) return `${m.cheapestAt} sells it at ${usd(m.marketLow)} (${usd(r.amount - m.marketLow)} less than you). Matching that price would have made you the pick.`;
     if (/Price changed/.test(r.reason)) return 'Keep the listed price and the checkout price the same.';
     if (/could not be checked/.test(r.reason)) return 'Show the price clearly on the product page so agents can verify it.';
-    if (/Shop not on/.test(r.reason)) return 'Customers choose allowed shops; being listed with KubePay as a trusted merchant helps.';
+    if (/Shop not on/.test(r.reason)) return 'Customers choose allowed shops; being listed with PayPalVault as a trusted merchant helps.';
     if (/Bill did not match/.test(r.reason)) return 'Send a PayPal invoice for the exact amount before the due date.';
     if (/another option/.test(r.reason)) return 'A lower price or better rating than the option the customer chose.';
     if (/budget ran out/.test(r.reason)) return 'Nothing on your side: the customer had no budget left.';

@@ -1,11 +1,14 @@
 import { Router } from 'express';
-import { z } from 'zod';
-import { changeVaultPolicy, LedgerError, prisma, startFunding, startLiquidation } from '@kubepay/db';
-import { createOrder, getSubscription } from '@kubepay/paypal';
+import { changeVaultPolicy, LedgerError, prisma, startFunding, startLiquidation } from '@paypalvault/db';
+import { createOrder, getSubscription } from '@paypalvault/paypal';
 import {
   compilePolicy, CreateProposalSchema, evaluate, itemProgress, listItems, PolicyCompileError, PolicySchema, ProposalOptionSchema,
   addInterval, SAVINGS_MAX_DAYS, savingsSchedule, SpendRequestSchema, toCents, type Policy, type SpendRequest,
-} from '@kubepay/policy';
+} from '@paypalvault/policy';
+import {
+  AgentRunBody, ChangePolicyBody, ChooseOptionBody, CompilePolicyBody, CreateVaultBody, ExpiryBody, FundRequestBody, OrderIdBody,
+  SubscriptionIdBody, VaultDetailsQuery, WhenBody,
+} from '../api-schemas.ts';
 import { emit } from '../events.ts';
 import { HttpError, requireInternalKey } from '../http.ts';
 import { continueShoppingList, runAgentForVault, runUsesOldPolicy, startWatching, stopWatching } from '../services/agent-runs.ts';
@@ -16,6 +19,7 @@ import { decideAndSpend, executeSpend } from '../services/spend.ts';
 import { payOutLiquidation, syncPendingPayouts } from '../services/payouts.ts';
 import { buildEngineContext, itemSpentCents } from '../services/policy-context.ts';
 import { chargeSavingsPayment, pauseSavings, rescheduleSavings, resumeSavings, savingsSummary } from '../services/savings.ts';
+import { verifyVault } from '../services/verify.ts';
 
 export const vaultsRouter = Router();
 
@@ -31,8 +35,37 @@ async function loadVault(id: string) {
 
 // ---------- Read ----------
 
+/** A vault's "Verified by PayPal" summary from its entries' last checks (null: never checked). */
+function verificationOf(rows: { paypalCheck: string | null; _count: { _all: number }; _max: { paypalCheckedAt: Date | null } }[]) {
+  const count = (check: string | null) => rows.find((r) => r.paypalCheck === check)?._count._all ?? 0;
+  const checkedAt = rows.reduce<Date | null>((at, r) => (r._max.paypalCheckedAt && (!at || r._max.paypalCheckedAt > at) ? r._max.paypalCheckedAt : at), null);
+  if (!checkedAt) return null;
+  return {
+    verified: count('VERIFIED'), waiting: count('WAITING'), mismatch: count('MISMATCH'),
+    unchecked: count('UNCHECKED'), notYet: count(null), checkedAt,
+  };
+}
+
+/**
+ * What Channel3's data saved, per vault: vs the most expensive approved store selling the same
+ * model, and vs the product's 90-day average price. Only purchases made with Channel3 data count.
+ */
+function channel3Savings(purchases: { vaultId: string; amountCents: number; decision: { requestJson: unknown } | null }[]) {
+  const out = new Map<string, { storesCents: number; averageCents: number; purchases: number }>();
+  for (const p of purchases) {
+    const c3 = SpendRequestSchema.safeParse(p.decision?.requestJson).data?.channel3;
+    if (!c3) continue;
+    const row = out.get(p.vaultId) ?? { storesCents: 0, averageCents: 0, purchases: 0 };
+    row.purchases += 1;
+    row.storesCents += Math.round((c3.saved ?? 0) * 100);
+    if (c3.history) row.averageCents += Math.max(0, Math.round(c3.history.mean * 100) - p.amountCents);
+    out.set(p.vaultId, row);
+  }
+  return out;
+}
+
 vaultsRouter.get('/', async (_req, res) => {
-  const [vaults, sums, open] = await Promise.all([
+  const [vaults, sums, open, purchases, checks] = await Promise.all([
     prisma.vault.findMany({
       orderBy: { createdAt: 'desc' },
       include: { policies: { orderBy: { version: 'desc' }, take: 1 }, fundRequests: { where: { status: 'OPEN' } } },
@@ -41,52 +74,113 @@ vaultsRouter.get('/', async (_req, res) => {
     prisma.ledgerEntry.groupBy({ by: ['vaultId', 'type'], where: { status: { not: 'FAILED' } }, _sum: { amountCents: true } }),
     // Ask me vaults: options waiting for the owner to pick one.
     prisma.proposal.groupBy({ by: ['vaultId'], where: { status: 'OPEN' }, _count: { _all: true } }),
+    // Purchases with the request behind them (its Channel3 data says what the purchase saved).
+    prisma.ledgerEntry.findMany({
+      where: { type: 'SPEND', status: { not: 'FAILED' }, decisionId: { not: null } },
+      select: { vaultId: true, amountCents: true, decision: { select: { requestJson: true } } },
+    }),
+    // "Verified by PayPal": each vault's entries by their last PayPal check.
+    prisma.ledgerEntry.groupBy({ by: ['vaultId', 'paypalCheck'], _count: { _all: true }, _max: { paypalCheckedAt: true } }),
   ]);
   const total = (vaultId: string, type: 'FUND' | 'SPEND' | 'LIQUIDATE') =>
     sums.find((row) => row.vaultId === vaultId && row.type === type)?._sum.amountCents ?? 0;
+  const saved = channel3Savings(purchases);
   res.json(vaults.map(({ policies, ...v }) => ({
     ...v,
     policy: policies[0]?.policyJson,
     policyVersion: policies[0]?.version,
     totals: { paidInCents: total(v.id, 'FUND'), spentCents: total(v.id, 'SPEND'), refundedCents: total(v.id, 'LIQUIDATE') },
     openProposals: open.find((row) => row.vaultId === v.id)?._count._all ?? 0,
+    channel3: saved.get(v.id) ?? null,
+    verification: verificationOf(checks.filter((row) => row.vaultId === v.id)),
   })));
 });
 
-vaultsRouter.get('/:id', async (req, res) => {
-  const { vault, policy } = await loadVault(req.params.id);
-  const [ledger, decisions, policyHistory, proposals, spentByItem, fundRequests] = await Promise.all([
-    prisma.ledgerEntry.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' }, include: { merchant: true } }),
-    prisma.decision.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' } }),
-    prisma.policy.findMany({
-      where: { vaultId: vault.id },
-      orderBy: { version: 'desc' },
-      select: { version: true, createdAt: true, sourceText: true, policyJson: true },
-    }),
-    prisma.proposal.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' }, take: 20 }),
-    itemSpentCents(vault.id),
-    prisma.fundRequest.findMany({ where: { vaultId: vault.id }, orderBy: { createdAt: 'desc' }, take: 10 }),
-  ]);
-  const savings = await savingsSummary(vault);
-  // Shopping lists: each item's limit right now, what it cost, and whether it waits for the owner.
-  const names = new Map(listItems(policy).map((i) => [i.id, i.name]));
-  const waiting = (itemId: string) =>
-    proposals.some((p) => p.status === 'OPEN' && p.itemId === itemId) ? 'OPTIONS'
-      : decisions.some((d) => d.result === 'NEEDS_HUMAN' && !d.resolvedBy && (d.requestJson as SpendRequest)?.item_id === itemId) ? 'APPROVAL'
-        : null;
-  const items = itemProgress(policy, vault.balanceCents, spentByItem).map((i) => ({ ...i, waiting: i.bought ? null : waiting(i.id) }));
-  const { policies, ...rest } = vault;
-  res.json({
-    ...rest, policy, ledger, decisions, policyHistory, items, savings, fundRequests,
-    proposals: proposals.map((p) => ({ ...p, itemName: p.itemId ? names.get(p.itemId) ?? p.itemId : null })),
+/**
+ * Full details (ledger, decisions, rule history, proposals, items, savings, friend requests) of
+ * every vault matching `where`, in a fixed number of queries. The database is a network hop away
+ * (~250 ms a query), so loading 27 vaults one by one took ~17 s; this takes about one vault's time.
+ */
+async function vaultDetails(where: { id: string } | { userId: string }) {
+  const vaults = await prisma.vault.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    include: { policies: { orderBy: { version: 'desc' }, take: 1 }, user: true },
   });
+  if (vaults.length === 0) return [];
+  const inVaults = { vaultId: { in: vaults.map((v) => v.id) } };
+  const [ledger, decisions, policyHistory, proposals, spent, fundRequests] = await Promise.all([
+    prisma.ledgerEntry.findMany({ where: inVaults, orderBy: { createdAt: 'desc' }, include: { merchant: true } }),
+    prisma.decision.findMany({ where: inVaults, orderBy: { createdAt: 'desc' } }),
+    prisma.policy.findMany({
+      where: inVaults,
+      orderBy: { version: 'desc' },
+      select: { vaultId: true, version: true, createdAt: true, sourceText: true, policyJson: true },
+    }),
+    prisma.proposal.findMany({ where: inVaults, orderBy: { createdAt: 'desc' } }),
+    // Shopping lists: money spent per item (payments that did not fail).
+    prisma.ledgerEntry.groupBy({
+      by: ['vaultId', 'itemId'],
+      where: { ...inVaults, type: 'SPEND', status: { not: 'FAILED' }, itemId: { not: null } },
+      _sum: { amountCents: true },
+    }),
+    prisma.fundRequest.findMany({ where: inVaults, orderBy: { createdAt: 'desc' } }),
+  ]);
+  const of = <T extends { vaultId: string }>(rows: T[], vaultId: string) => rows.filter((r) => r.vaultId === vaultId);
+
+  return Promise.all(vaults.map(async (vault) => {
+    const policy = PolicySchema.parse(vault.policies[0]?.policyJson);
+    const vLedger = of(ledger, vault.id);
+    const vDecisions = of(decisions, vault.id);
+    const vProposals = of(proposals, vault.id).slice(0, 20);
+    const spentByItem = Object.fromEntries(of(spent, vault.id).map((r) => [r.itemId!, r._sum.amountCents ?? 0]));
+    const paymentsMade = vLedger.filter((e) => e.type === 'FUND' && e.status === 'COMPLETED').length;
+    const savings = await savingsSummary(vault, paymentsMade); // no query: paymentsMade is given
+    // Shopping lists: each item's limit right now, what it cost, and whether it waits for the owner.
+    const names = new Map(listItems(policy).map((i) => [i.id, i.name]));
+    const waiting = (itemId: string) =>
+      vProposals.some((p) => p.status === 'OPEN' && p.itemId === itemId) ? 'OPTIONS'
+        : vDecisions.some((d) => d.result === 'NEEDS_HUMAN' && !d.resolvedBy && (d.requestJson as SpendRequest)?.item_id === itemId) ? 'APPROVAL'
+          : null;
+    const items = itemProgress(policy, vault.balanceCents, spentByItem).map((i) => ({ ...i, waiting: i.bought ? null : waiting(i.id) }));
+    const { policies, ...rest } = vault;
+    return {
+      ...rest, policy, ledger: vLedger, decisions: vDecisions, items, savings,
+      policyHistory: of(policyHistory, vault.id).map(({ vaultId, ...p }) => p),
+      fundRequests: of(fundRequests, vault.id).slice(0, 10),
+      proposals: vProposals.map((p) => ({ ...p, itemName: p.itemId ? names.get(p.itemId) ?? p.itemId : null })),
+    };
+  }));
+}
+
+// "Verify now": checks this vault's payments against PayPal's own records. Read-only: PayPal is
+// only asked, never paid, and the ledger's amounts and statuses are never changed.
+const lastVerify = new Map<string, number>();
+vaultsRouter.post('/:id/verify', async (req, res) => {
+  const id = req.params.id;
+  if (!(await prisma.vault.findUnique({ where: { id }, select: { id: true } }))) throw new HttpError(404, 'VAULT_NOT_FOUND');
+  if (Date.now() - (lastVerify.get(id) ?? 0) < 15_000) throw new HttpError(429, 'VERIFY_TOO_SOON', { message: 'Checked a moment ago. Try again in a few seconds.' });
+  lastVerify.set(id, Date.now());
+  res.json(await verifyVault(id));
+});
+
+// Every vault of one customer, with full details (the calendar shows them all at once).
+vaultsRouter.get('/details', async (req, res) => {
+  const { userId } = VaultDetailsQuery.parse(req.query);
+  res.json(await vaultDetails({ userId }));
+});
+
+vaultsRouter.get('/:id', async (req, res) => {
+  const [vault] = await vaultDetails({ id: req.params.id });
+  if (!vault) throw new HttpError(404, 'VAULT_NOT_FOUND');
+  res.json(vault);
 });
 
 // ---------- Create ----------
 
 // Step 1 of creating a vault: plain English -> policy preview. Nothing is saved.
 vaultsRouter.post('/compile', async (req, res) => {
-  const { text } = z.object({ text: z.string().min(5).max(1000) }).parse(req.body);
+  const { text } = CompilePolicyBody.parse(req.body);
   const merchants = await prisma.merchant.findMany({ where: { approved: true }, select: { name: true, category: true } });
   try {
     res.json(await compilePolicy(text, merchants));
@@ -97,11 +191,6 @@ vaultsRouter.post('/compile', async (req, res) => {
 });
 
 // Step 2: the user confirmed the (possibly edited) policy -> save the vault.
-const CreateVaultBody = z.object({
-  policy: PolicySchema,
-  sourceText: z.string().max(1000).optional(),
-  userId: z.string().optional(),
-});
 
 vaultsRouter.post('/', async (req, res) => {
   const body = CreateVaultBody.parse(req.body);
@@ -142,11 +231,6 @@ vaultsRouter.post('/', async (req, res) => {
 // version (earlier versions stay as history). A lower amount refunds the difference right away;
 // a higher amount must be paid in first (FUND entry for the difference). `dryRun` only checks the
 // change and says how much money moves.
-const ChangePolicyBody = z.object({
-  policy: PolicySchema,
-  sourceText: z.string().max(1000).optional(),
-  dryRun: z.boolean().optional(),
-});
 
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -230,7 +314,7 @@ vaultsRouter.post('/:id/fund/order', async (req, res) => {
   const order = await createOrder({
     vaultId: vault.id,
     amountCents: vault.budgetCents,
-    description: `Fund KubePay vault: ${vault.name}`,
+    description: `Fund PayPalVault vault: ${vault.name}`,
     requestId: `fund-${vault.id}`,
   });
   // Same request id returns the same order, so only record it once.
@@ -242,7 +326,7 @@ vaultsRouter.post('/:id/fund/order', async (req, res) => {
 // A client that credits the vault itself (the PayPal site pays from a saved PayPal account and writes
 // the FUND entry directly) reports it here, so live updates and alert emails still happen.
 vaultsRouter.post('/:id/fund/recorded', requireInternalKey, async (req, res) => {
-  const { orderId } = z.object({ orderId: z.string().min(1) }).parse(req.body);
+  const { orderId } = OrderIdBody.parse(req.body);
   const entry = await prisma.ledgerEntry.findUnique({ where: { paypalRef: orderId } });
   if (!entry || entry.vaultId !== req.params.id || entry.type !== 'FUND') throw new HttpError(404, 'ORDER_NOT_FOUND');
   emit('vault:updated', { vaultId: entry.vaultId });
@@ -251,7 +335,7 @@ vaultsRouter.post('/:id/fund/recorded', requireInternalKey, async (req, res) => 
 });
 
 vaultsRouter.post('/:id/fund/capture', async (req, res) => {
-  const { orderId } = z.object({ orderId: z.string() }).parse(req.body);
+  const { orderId } = OrderIdBody.parse(req.body);
   const entry = await prisma.ledgerEntry.findUnique({ where: { paypalRef: orderId } });
   if (!entry || entry.vaultId !== req.params.id || entry.type !== 'FUND') throw new HttpError(404, 'ORDER_NOT_FOR_THIS_VAULT');
   const { vault } = await finishFunding(orderId);
@@ -261,7 +345,7 @@ vaultsRouter.post('/:id/fund/capture', async (req, res) => {
 // ---------- Ask a friend (PayPal money request; the friend's payment goes straight into the vault) ----------
 
 vaultsRouter.post('/:id/fund/requests', async (req, res) => {
-  const body = z.object({ payerEmail: z.string().min(3).max(254), message: z.string().max(500).optional(), requesterName: z.string().max(100).optional() }).parse(req.body);
+  const body = FundRequestBody.parse(req.body);
   res.status(201).json(await createFundRequest(req.params.id, body));
 });
 
@@ -293,7 +377,7 @@ vaultsRouter.post('/:id/subscribe', async (req, res) => {
 });
 
 vaultsRouter.post('/:id/subscribe/confirm', async (req, res) => {
-  const { subscriptionId } = z.object({ subscriptionId: z.string() }).parse(req.body);
+  const { subscriptionId } = SubscriptionIdBody.parse(req.body);
   const sub = await getSubscription(subscriptionId);
   if (sub.vaultId !== req.params.id || sub.planId !== process.env.PAYPAL_UTILITY_PLAN_ID) {
     throw new HttpError(409, 'SUBSCRIPTION_NOT_FOR_THIS_VAULT');
@@ -322,7 +406,7 @@ vaultsRouter.post<{ id: string }>('/:id/spend', requireInternalKey, async (req, 
 // dashboard as an agent:step event; the agent spends only through POST /:id/spend above.
 // A shopping run that finds nothing (NO_MATCH) is retried automatically until expiry (watch mode).
 vaultsRouter.post('/:id/agent', async (req, res) => {
-  const { task } = z.object({ task: z.string().max(500).optional() }).parse(req.body ?? {});
+  const { task } = AgentRunBody.parse(req.body ?? {});
   const { vault } = await loadVault(req.params.id);
   if (vault.type === 'SAVINGS') throw new HttpError(409, 'NO_AGENT', { message: 'A savings vault has no agent: it only saves.' });
   if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE');
@@ -394,7 +478,7 @@ vaultsRouter.post<{ id: string }>('/:id/proposals', requireInternalKey, async (r
 // stands in for the control setting, every other rule still applies. A blocked pick reopens the
 // options so another one can be picked.
 vaultsRouter.post('/:id/proposals/:proposalId/choose', async (req, res) => {
-  const { index } = z.object({ index: z.number().int().min(0).max(2) }).parse(req.body);
+  const { index } = ChooseOptionBody.parse(req.body);
   const { vault, policy } = await loadVault(req.params.id);
   const proposal = await prisma.proposal.findUnique({ where: { id: req.params.proposalId } });
   if (!proposal || proposal.vaultId !== vault.id || proposal.status !== 'OPEN') throw new HttpError(409, 'PROPOSAL_NOT_OPEN');
@@ -456,7 +540,7 @@ vaultsRouter.post<{ id: string }>('/:id/savings/charge', requireInternalKey, asy
 // Move the agent's next check (vault timeline drag). Nothing moves money, so no extra checks needed
 // beyond: the vault is active, the agent is watching it, and the time is before the vault ends.
 vaultsRouter.post('/:id/agent/next', async (req, res) => {
-  const { at } = z.object({ at: z.coerce.date() }).parse(req.body);
+  const { at } = WhenBody.parse(req.body);
   const { vault } = await loadVault(req.params.id);
   if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'The agent only works while the vault is active.' });
   if (!vault.nextAgentRunAt) throw new HttpError(409, 'NOT_WATCHING', { message: 'The agent is not watching this vault. Tap Run now first.' });
@@ -469,7 +553,7 @@ vaultsRouter.post('/:id/agent/next', async (req, res) => {
 
 // Move the next savings payment (vault calendar drag).
 vaultsRouter.post('/:id/savings/next', async (req, res) => {
-  const { at } = z.object({ at: z.coerce.date() }).parse(req.body);
+  const { at } = WhenBody.parse(req.body);
   res.json(await rescheduleSavings(req.params.id, at));
 });
 
@@ -477,7 +561,7 @@ vaultsRouter.post('/:id/savings/next', async (req, res) => {
 // policy version (same rules otherwise), money and purchases waiting for approval are untouched.
 const MAX_VAULT_DAYS = 90;
 vaultsRouter.post('/:id/expiry', async (req, res) => {
-  const { expiresAt } = z.object({ expiresAt: z.coerce.date() }).parse(req.body);
+  const { expiresAt } = ExpiryBody.parse(req.body);
   const { vault, policy } = await loadVault(req.params.id);
   const now = new Date();
   if (vault.status !== 'ACTIVE' && vault.status !== 'SAVING') {

@@ -1,5 +1,5 @@
 {
-  "name": "@kubepay/paypal",
+  "name": "@paypalvault/paypal",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@paypal/paypal-server-sdk": "2.5.0",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "invoices": "*"
   }
 }

@@ -1,11 +1,11 @@
-/* Bryntum thin packages: FontAwesome + core + every product's structural CSS + one theme. */
-@import '@bryntum/core-thin/fontawesome/css/fontawesome.css';
-@import '@bryntum/core-thin/fontawesome/css/solid.css';
-@import '@bryntum/core-thin/core.css';
-@import '@bryntum/grid-thin/grid.css';
-@import '@bryntum/scheduler-thin/scheduler.css';
-@import '@bryntum/schedulerpro-thin/schedulerpro.css';
-@import '@bryntum/calendar-thin/calendar.css';
-@import '@bryntum/gantt-thin/gantt.css';
-@import '@bryntum/taskboard-thin/taskboard.css';
-@import '@bryntum/core-thin/svalbard-light.css';
+/* Bryntum Enterprise, several products on one page: FontAwesome + the thin structural CSS of each
+   product level + one theme, taken from the highest level (Gantt), as Bryntum's README describes. */
+@import '@bryntum/core-enterprise/fontawesome/css/fontawesome.css';
+@import '@bryntum/core-enterprise/fontawesome/css/solid.css';
+@import '@bryntum/core-enterprise/core.thin.css';
+@import '@bryntum/grid-enterprise/grid.thin.css';
+@import '@bryntum/scheduler-enterprise/scheduler.thin.css';
+@import '@bryntum/gantt-enterprise/gantt.thin.css';
+@import '@bryntum/calendar-enterprise/calendar.thin.css';
+@import '@bryntum/taskboard-enterprise/taskboard.thin.css';
+@import '@bryntum/gantt-enterprise/svalbard-light.css';

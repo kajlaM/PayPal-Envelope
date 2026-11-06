@@ -1,5 +1,5 @@
 import { generateText, stepCountIs, type ToolSet } from 'ai';
-import { policyModels } from '@kubepay/policy';
+import { policyModels } from '@paypalvault/policy';
 
 export type AgentStep = { tool: string; input: unknown; output: unknown };
 

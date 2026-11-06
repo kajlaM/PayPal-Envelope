@@ -1,5 +1,5 @@
 {
-  "name": "@kubepay/sweeper",
+  "name": "@paypalvault/sweeper",
   "version": "0.1.0",
   "private": true,
   "type": "module",

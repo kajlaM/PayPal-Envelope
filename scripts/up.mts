@@ -1,4 +1,4 @@
-// One command for the whole stack: KubePay API + PayPal site + Cloudflare link.
+// One command for the whole stack: PayPalVault API + PayPal site + Cloudflare link.
 //   npm run up            ->  prints https://<name>.trycloudflare.com
 //   npm run up -- --local ->  same, without the tunnel (http://localhost:3000)
 // Ctrl+C stops everything. If one part crashes, the others are stopped too.
@@ -136,7 +136,7 @@ async function main() {
     log('up', `Got ${url}`);
   }
 
-  log('up', 'Starting the KubePay API...');
+  log('up', 'Starting the PayPalVault API...');
   start('api', 'npm', ['run', 'api:start'], { SITE_URL: url });
   await waitFor('api', `http://localhost:${API_PORT}/health`, 60_000);
   log('up', `API ready on http://localhost:${API_PORT}`);

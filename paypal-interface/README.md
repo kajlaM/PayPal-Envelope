@@ -6,7 +6,7 @@ A high-fidelity replica of the **PayPal Login** and **Wallet Dashboard** interfa
 
 ## 🚀 How to View & Open
 
-The site now has real logins and reads vaults from the KubePay backend, so it runs through its own small server (`server.ts`). Opening `index.html` directly no longer works.
+The site now has real logins and reads vaults from the PayPalVault backend, so it runs through its own small server (`server.ts`). Opening `index.html` directly no longer works.
 
 From the repo root, one command starts everything and prints the Cloudflare link:
 ```bash
@@ -16,7 +16,7 @@ npm run up -- --local   # same, without the tunnel
 
 Or run the parts yourself, in three terminals:
 ```bash
-npm run api:dev      # KubePay API on :4000 (the backend, stays private)
+npm run api:dev      # PayPalVault API on :4000 (the backend, stays private)
 npm run site:dev     # this site on http://localhost:3000 (the front end)
 npm run tunnel       # Cloudflare link -> this site (prints https://<name>.trycloudflare.com)
 ```
@@ -26,7 +26,7 @@ nothing else needs to be public:
 - `/socket.io` (live vault updates, incl. WebSocket)
 - `/webhooks` (PayPal webhooks: register `https://<tunnel>/webhooks/paypal` with `npm run setup:webhooks -w packages/paypal -- https://<tunnel>`)
 
-`GET /health` reports whether the site and the API are both up. The API URL comes from `KUBEPAY_API_URL` (default `http://localhost:4000`), the site port from `INTERFACE_PORT` (default `3000`).
+`GET /health` reports whether the site and the API are both up. The API URL comes from `PAYPALVAULT_API_URL` (default `http://localhost:4000`), the site port from `INTERFACE_PORT` (default `3000`).
 
 ### Demo customers
 | Username (or log in with the email) | Password | Linked PayPal sandbox account |
@@ -34,15 +34,15 @@ nothing else needs to be public:
 | `kajla` | `1234` | `kajla@personal.example.com` |
 | `jugal` | `1234` | `jugal@personal.example.com` |
 
-Accounts live in `accounts.ts`. On first login each customer gets a KubePay user (matched by sandbox email), and the Vaults section shows only that customer's vaults.
+Accounts live in `accounts.ts`. On first login each customer gets a PayPalVault user (matched by sandbox email), and the Vaults section shows only that customer's vaults.
 
 ### How vaults work here
 1. **Link PayPal (once per customer).** A PayPal sandbox window opens. Log in there with the sandbox account's own password from developer.paypal.com and approve. The site saves that PayPal account (PayPal Vault API, `paypal-link.ts`, stored in `data/links.json`), and only accepts the customer's own sandbox email.
-2. **Create a vault.** Enter an amount and describe the job in plain English. The KubePay AI writes the rules, you review them and confirm with your password (`1234`). The amount is charged to the saved PayPal account at once, the vault becomes active, and its AI agent starts (Channel3 product search for shopping vaults).
+2. **Create a vault.** Enter an amount and describe the job in plain English. The PayPalVault writes the rules, you review them and confirm with your password (`1234`). The amount is charged to the saved PayPal account at once, the vault becomes active, and its AI agent starts (Channel3 product search for shopping vaults).
    **Funding choice** (review step, or "Fund this vault" on a vault still awaiting funding). Only PayPal's own options, no cards or Venmo:
    - **Pay with PayPal**: taken from the saved PayPal account right away (password).
    - **PayPal Pay Later**: the PayPal JS SDK Pay Later button. The vault gets the full amount at once, and the customer pays PayPal back in 4 payments (Pay in 4, US accounts, $30 to $1,500). Same Orders API order and capture as a normal funding.
-   - **Ask a friend on PayPal**: KubePay's platform account sends a PayPal money request (Invoicing API) to the friend's PayPal email. The friend pays it on PayPal and the money goes straight into the vault (`fund_requests` table, FUND entry with the invoice id). The friend sees it under **Money requests for you** when they log in here. The vault learns about the payment from the `INVOICING.INVOICE.PAID` webhook (platform app), the background tick, or "Check now". Requests still open when the vault expires are cancelled.
+   - **Ask a friend on PayPal**: PayPalVault's platform account sends a PayPal money request (Invoicing API) to the friend's PayPal email. The friend pays it on PayPal and the money goes straight into the vault (`fund_requests` table, FUND entry with the invoice id). The friend sees it under **Money requests for you** when they log in here. The vault learns about the payment from the `INVOICING.INVOICE.PAID` webhook (platform app), the background tick, or "Check now". Requests still open when the vault expires are cancelled.
 3. **Manage.** Click a vault for its rules, live agent steps, activity, purchases waiting for your approval (password needed), and "Close vault & refund".
 
 **Balance:** read live from the sandbox account itself. PayPal has no API for a personal account's balance, so `sandbox-balance.ts` logs in to sandbox.paypal.com as the customer in a hidden Chrome and reads the balance PayPal shows (cached 30 s, re-read after every payment). It needs each account's sandbox login password in the repo-root `.env`:

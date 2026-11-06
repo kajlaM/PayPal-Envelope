@@ -1,5 +1,5 @@
 {
-  "name": "@kubepay/audit",
+  "name": "@paypalvault/audit",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@elastic/elasticsearch": "9.5.1",
-    "@kubepay/policy": "*",
+    "@paypalvault/policy": "*",
     "ai": "5.0.272",
     "dotenv": "^16.6.1"
   }

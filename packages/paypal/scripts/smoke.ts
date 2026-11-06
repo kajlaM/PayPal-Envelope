@@ -1,4 +1,4 @@
-// Checks every PayPal API we use against the sandbox. Run: npm run smoke -w @kubepay/paypal
+// Checks every PayPal API we use against the sandbox. Run: npm run smoke -w @paypalvault/paypal
 // Fill PAYPAL_*, UTILITY_* and the sandbox emails in .env first.
 import { randomUUID } from 'node:crypto';
 import {
@@ -21,7 +21,7 @@ await step('platform app token', async () => (await getAccessToken(platformCrede
 await step('utility app token', async () => (await getAccessToken(utilityCredentials())).slice(0, 12) + '...');
 
 await step('Orders: create $1.00 order', () =>
-  createOrder({ vaultId: 'smoke-test', amountCents: 100, description: 'KubePay smoke test' }));
+  createOrder({ vaultId: 'smoke-test', amountCents: 100, description: 'PayPalVault smoke test' }));
 
 let batchId = '';
 await step('Payouts: send $1.00 to audio-store', async () => {
@@ -29,7 +29,7 @@ await step('Payouts: send $1.00 to audio-store', async () => {
     ledgerEntryId: `smoke-${randomUUID()}`,
     receiverEmail: process.env.AUDIO_STORE_SANDBOX_EMAIL!,
     amountCents: 100,
-    note: 'KubePay smoke test',
+    note: 'PayPalVault smoke test',
   });
   batchId = res.payoutBatchId;
   return res;

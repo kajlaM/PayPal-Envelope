@@ -2,7 +2,7 @@ import { IntervalUnit, PlanRequestStatus, TenureType } from '@paypal/paypal-serv
 import { platformCredentials } from './config.ts';
 import { paypalRequest } from './http.ts';
 import { centsToValue, CURRENCY } from './money.ts';
-import { sdk } from './sdk.ts';
+import { paypalSdk } from './sdk.ts';
 
 // Subscriptions API: monthly auto top-up of the utility vault.
 // One-time setup: createProduct() then createMonthlyPlan() (see scripts/setup-plan.ts).
@@ -18,7 +18,7 @@ export async function createProduct(name: string, description: string) {
 
 /** POST /v1/billing/plans: a fixed monthly amount, billed until cancelled. */
 export async function createMonthlyPlan(input: { productId: string; name: string; amountCents: number }) {
-  const { result } = await sdk().subscriptions.createBillingPlan({
+  const result = await paypalSdk((c) => c.subscriptions.createBillingPlan({
     body: {
       productId: input.productId,
       name: input.name,
@@ -34,13 +34,13 @@ export async function createMonthlyPlan(input: { productId: string; name: string
       ],
       paymentPreferences: { autoBillOutstanding: true, paymentFailureThreshold: 1 },
     },
-  });
+  }));
   return { planId: result.id!, status: result.status };
 }
 
 /** GET /v1/billing/subscriptions/{id} */
 export async function getSubscription(subscriptionId: string) {
-  const { result } = await sdk().subscriptions.getSubscription({ id: subscriptionId });
+  const result = await paypalSdk((c) => c.subscriptions.getSubscription({ id: subscriptionId }));
   return {
     subscriptionId: result.id!,
     status: result.status,
@@ -51,5 +51,5 @@ export async function getSubscription(subscriptionId: string) {
 
 /** POST /v1/billing/subscriptions/{id}/cancel. Use when a utility vault is torn down. */
 export async function cancelSubscription(subscriptionId: string, reason: string) {
-  await sdk().subscriptions.cancelSubscription({ id: subscriptionId, body: { reason } });
+  await paypalSdk((c) => c.subscriptions.cancelSubscription({ id: subscriptionId, body: { reason } }));
 }

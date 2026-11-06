@@ -5,3 +5,6 @@ dist/
 packages/db/src/generated/
 paypal-interface/data/
 paypal-interface/vendor/
+
+# APIMatic outputs (private docs portal, generated builds)
+apimatic/vault/portal/

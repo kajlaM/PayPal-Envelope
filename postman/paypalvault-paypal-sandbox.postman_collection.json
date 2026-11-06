@@ -1,0 +1,440 @@
+{
+  "info": {
+    "name": "PayPalVault – PayPal sandbox",
+    "description": "Direct PayPal sandbox calls PayPalVault depends on: OAuth token, Orders, Payouts, Invoicing, and negative tests with the PayPal-Mock-Response header. Use the 'PayPalVault sandbox' environment. Run the whole collection in order.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Platform access token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paypal_base_url}}/v1/oauth2/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                }
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{paypal_client_id}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{paypal_client_secret}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().access_token;",
+                  "pm.test('has access token', () => pm.expect(t).to.be.a('string'));",
+                  "pm.collectionVariables.set('access_token', t);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Utility access token (city-utility app)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{paypal_base_url}}/v1/oauth2/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                }
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{utility_client_id}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{utility_client_secret}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('utility_token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Orders (vault funding)",
+      "item": [
+        {
+          "name": "Create order ($1.00)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "PayPal-Request-Id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{paypal_base_url}}/v2/checkout/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"intent\": \"CAPTURE\",\n  \"purchase_units\": [\n    {\n      \"amount\": {\n        \"currency_code\": \"USD\",\n        \"value\": \"1.00\"\n      },\n      \"description\": \"Postman test order\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const o = pm.response.json();",
+                  "pm.test('order created', () => pm.expect(o.status).to.eql('CREATED'));",
+                  "pm.test('has approve link', () => pm.expect(o.links.some(l => l.rel === 'approve' || l.rel === 'payer-action')).to.be.true);",
+                  "pm.collectionVariables.set('order_id', o.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{paypal_base_url}}/v2/checkout/orders/{{order_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('same order', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('order_id')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capture before approval is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "PayPal-Request-Id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{paypal_base_url}}/v2/checkout/orders/{{order_id}}/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "The buyer never approved this order, so PayPal must refuse to take the money."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));",
+                  "pm.test('ORDER_NOT_APPROVED', () => pm.expect(pm.response.json().details[0].issue).to.eql('ORDER_NOT_APPROVED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capture declined (mock INSTRUMENT_DECLINED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "PayPal-Request-Id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "PayPal-Mock-Response",
+                "value": "{\"mock_application_codes\":\"INSTRUMENT_DECLINED\"}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{paypal_base_url}}/v2/checkout/orders/{{order_id}}/capture",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "Negative test: the buyer's card or bank is declined at capture. PayPalVault marks the FUND entry FAILED and the vault stays unfunded."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));",
+                  "pm.test('INSTRUMENT_DECLINED', () => pm.expect(pm.response.json().details[0].issue).to.eql('INSTRUMENT_DECLINED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Payouts (spend and refund)",
+      "item": [
+        {
+          "name": "Send payout ($1.00 to merchant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{paypal_base_url}}/v1/payments/payouts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_batch_header\": {\n    \"sender_batch_id\": \"postman-{{$guid}}\",\n    \"email_subject\": \"Postman test payout\"\n  },\n  \"items\": [\n    {\n      \"recipient_type\": \"EMAIL\",\n      \"receiver\": \"{{merchant_email}}\",\n      \"amount\": {\n        \"value\": \"1.00\",\n        \"currency\": \"USD\"\n      },\n      \"sender_item_id\": \"postman-{{$guid}}\",\n      \"note\": \"Postman test payout\"\n    }\n  ]\n}"
+            },
+            "description": "Moves $1 of sandbox money from the platform account to the merchant sandbox account."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json().batch_header;",
+                  "pm.test('batch accepted', () => pm.expect(['PENDING', 'PROCESSING', 'SUCCESS']).to.include(b.batch_status));",
+                  "pm.collectionVariables.set('payout_batch_id', b.payout_batch_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get payout batch",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{paypal_base_url}}/v1/payments/payouts/{{payout_batch_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items || [];",
+                  "pm.test('one item', () => pm.expect(items.length).to.eql(1));",
+                  "console.log('payout item status:', items[0] && items[0].transaction_status);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same sender_batch_id twice is refused (idempotency)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{paypal_base_url}}/v1/payments/payouts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_batch_header\": {\n    \"sender_batch_id\": \"{{dup_batch_id}}\"\n  },\n  \"items\": [\n    {\n      \"recipient_type\": \"EMAIL\",\n      \"receiver\": \"{{merchant_email}}\",\n      \"amount\": {\n        \"value\": \"0.01\",\n        \"currency\": \"USD\"\n      }\n    }\n  ]\n}"
+            },
+            "description": "PayPalVault uses the ledger entry id as sender_batch_id, so a retried payout can never pay twice. Sends $0.01, then the same batch again, which PayPal must reject."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('dup_batch_id', 'postman-dup-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.sendRequest({",
+                  "  url: pm.variables.replaceIn('{{paypal_base_url}}/v1/payments/payouts'), method: 'POST',",
+                  "  header: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + pm.collectionVariables.get('access_token') },",
+                  "  body: { mode: 'raw', raw: pm.request.body.raw.replace('{{dup_batch_id}}', pm.collectionVariables.get('dup_batch_id')).replace('{{merchant_email}}', pm.variables.get('merchant_email')) },",
+                  "}, (err, res) => {",
+                  "  pm.test('second payout with the same id is rejected', () => {",
+                  "    pm.expect(err).to.be.null;",
+                  "    pm.expect(res.code).to.be.oneOf([400, 422]);",
+                  "    pm.expect(res.json().name).to.eql('USER_BUSINESS_ERROR');",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payout refused (mock INSUFFICIENT_FUNDS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "PayPal-Mock-Response",
+                "value": "{\"mock_application_codes\":\"INSUFFICIENT_FUNDS\"}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{paypal_base_url}}/v1/payments/payouts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender_batch_header\": {\n    \"sender_batch_id\": \"postman-{{$guid}}\"\n  },\n  \"items\": [\n    {\n      \"recipient_type\": \"EMAIL\",\n      \"receiver\": \"{{merchant_email}}\",\n      \"amount\": {\n        \"value\": \"1.00\",\n        \"currency\": \"USD\"\n      }\n    }\n  ]\n}"
+            },
+            "description": "Negative test: the platform has no money. PayPalVault's executeSpend then fails the SPEND entry and puts the money back in the vault."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));",
+                  "pm.test('INSUFFICIENT_FUNDS', () => pm.expect(pm.response.json().name).to.eql('INSUFFICIENT_FUNDS'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Invoicing (utility bills)",
+      "item": [
+        {
+          "name": "List utility invoices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{paypal_base_url}}/v2/invoicing/invoices?page_size=5&total_required=true",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{utility_token}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has items array', () => pm.expect(pm.response.json()).to.have.property('items'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "utility_token",
+      "value": ""
+    },
+    {
+      "key": "order_id",
+      "value": ""
+    },
+    {
+      "key": "payout_batch_id",
+      "value": ""
+    },
+    {
+      "key": "dup_batch_id",
+      "value": ""
+    }
+  ]
+}

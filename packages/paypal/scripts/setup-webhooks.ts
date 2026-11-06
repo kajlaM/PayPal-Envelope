@@ -1,5 +1,5 @@
 // npm run setup:webhooks -w packages/paypal -- https://<public-api-url>
-// Registers (or updates) the KubePay webhooks on both sandbox apps and prints the ids for .env.
+// Registers (or updates) the PayPalVault webhooks on both sandbox apps and prints the ids for .env.
 import { upsertWebhook } from '../src/index.ts';
 
 const base = process.argv[2]?.replace(/\/$/, '');

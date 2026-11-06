@@ -1,5 +1,5 @@
 // Try the Policy Compiler from the terminal:
-//   npm run compile -w @kubepay/policy -- "Create a vault with $50 to buy headphones before Sunday, max spend $45"
+//   npm run compile -w @paypalvault/policy -- "Create a vault with $50 to buy headphones before Sunday, max spend $45"
 import { config } from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { compilePolicy } from '../src/index.ts';

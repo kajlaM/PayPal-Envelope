@@ -1,26 +1,27 @@
 {
-  "name": "kubepay-ai",
+  "name": "paypalvault",
   "private": true,
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "db:generate": "npm run generate -w @kubepay/db",
-    "db:migrate": "npm run migrate -w @kubepay/db",
-    "db:deploy": "npm run deploy -w @kubepay/db",
-    "db:seed": "npm run seed -w @kubepay/db",
-    "db:studio": "npm run studio -w @kubepay/db",
+    "db:generate": "npm run generate -w @paypalvault/db",
+    "db:migrate": "npm run migrate -w @paypalvault/db",
+    "db:deploy": "npm run deploy -w @paypalvault/db",
+    "db:seed": "npm run seed -w @paypalvault/db",
+    "db:studio": "npm run studio -w @paypalvault/db",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "api:dev": "npm run dev -w @kubepay/api",
-    "api:start": "npm run start -w @kubepay/api",
-    "web:dev": "npm run dev -w @kubepay/web",
-    "web:build": "npm run build -w @kubepay/web",
+    "api:dev": "npm run dev -w @paypalvault/api",
+    "api:start": "npm run start -w @paypalvault/api",
+    "web:dev": "npm run dev -w @paypalvault/web",
+    "web:build": "npm run build -w @paypalvault/web",
     "site:dev": "tsx watch paypal-interface/server.ts",
     "site:start": "tsx paypal-interface/server.ts",
     "tunnel": "npx -y cloudflared tunnel --url http://localhost:3000",
     "up": "tsx scripts/up.mts",
-    "build:bryntum": "node scripts/build-bryntum.mjs"
+    "build:bryntum": "node scripts/build-bryntum.mjs",
+    "apimatic": "node scripts/apimatic.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
@@ -28,14 +29,13 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@bryntum/calendar-thin": "npm:@bryntum/calendar-thin-trial@7.3.7",
-    "@bryntum/core-thin": "npm:@bryntum/core-thin-trial@7.3.7",
-    "@bryntum/engine-thin": "npm:@bryntum/engine-thin-trial@7.3.7",
-    "@bryntum/gantt-thin": "npm:@bryntum/gantt-thin-trial@7.3.7",
-    "@bryntum/grid-thin": "npm:@bryntum/grid-thin-trial@7.3.7",
-    "@bryntum/scheduler-thin": "npm:@bryntum/scheduler-thin-trial@7.3.7",
-    "@bryntum/schedulerpro-thin": "npm:@bryntum/schedulerpro-thin-trial@7.3.7",
-    "@bryntum/taskboard-thin": "npm:@bryntum/taskboard-thin-trial@7.3.7",
+    "@bryntum/calendar-enterprise": "8.0.0",
+    "@bryntum/core-enterprise": "8.0.0",
+    "@bryntum/engine-enterprise": "8.0.0",
+    "@bryntum/gantt-enterprise": "8.0.0",
+    "@bryntum/grid-enterprise": "8.0.0",
+    "@bryntum/scheduler-enterprise": "8.0.0",
+    "@bryntum/taskboard-enterprise": "8.0.0",
     "ag-charts-community": "14.2.0",
     "ag-grid-community": "36.2.0"
   }

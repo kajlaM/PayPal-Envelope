@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compareStores, historyText, modelCode, priceVerdict, sameModel, shouldWaitForPrice } from './channel3.ts';
+import { compareStores, dailyPoints, historyText, modelCode, priceVerdict, sameModel, shouldWaitForPrice } from './channel3.ts';
 import type { Product } from './search.ts';
 
 const p = (over: Partial<Product>): Product => ({
@@ -47,4 +47,16 @@ test('price verdict comes from the numbers (not the label)', () => {
   assert.equal(priceVerdict(41, h), 'low'); // 10%+ under the average
   assert.equal(priceVerdict(46, h), 'typical');
   assert.equal(priceVerdict(52, h), 'high'); // 10%+ over the average
+});
+
+test('dailyPoints: one price per day (the lowest), oldest first, USD only', () => {
+  const points = dailyPoints([
+    { timestamp: '2026-10-02T18:00:00Z', price: 51, currency: 'USD' },
+    { timestamp: '2026-10-01T09:00:00Z', price: 49.999, currency: 'USD' },
+    { timestamp: '2026-10-02T08:00:00Z', price: 55, currency: 'USD' },
+    { timestamp: '2026-10-03T08:00:00Z', price: 40, currency: 'EUR' },
+    { timestamp: 'bad', price: 'x' },
+  ]);
+  assert.deepEqual(points, [['2026-10-01', 50], ['2026-10-02', 51]]); // Oct 2: lowest of 51 and 55
+  assert.deepEqual(dailyPoints(undefined), []);
 });

@@ -1,10 +1,10 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { getVault, requestPurchase } from './kubepay.ts';
+import { getVault, requestPurchase } from './paypalvault.ts';
 import { runAgent, type AgentStep } from './runner.ts';
 import { invoiceTools } from './toolkit.ts';
 
-const DEFAULT_TASK = 'Pay every open bill sent to KubePay by an approved utility.';
+const DEFAULT_TASK = 'Pay every open bill sent to PayPalVault by an approved utility.';
 
 /**
  * Bill-pay agent (Vault B): reads invoices with the PayPal Agent Toolkit, then pays each open one
@@ -24,7 +24,7 @@ export async function runBillPayAgent(input: { vaultId: string; task?: string; o
   const tools = {
     ...invoiceTools(),
     pay_invoice: tool({
-      description: 'Ask KubePay to pay one invoice from this vault. Returns the Policy Engine decision and reason codes.',
+      description: 'Ask PayPalVault to pay one invoice from this vault. Returns the Policy Engine decision and reason codes.',
       inputSchema: z.object({
         invoice_id: z.string(),
         merchant: z.string().describe('Approved merchant that sent the invoice'),
@@ -43,7 +43,7 @@ export async function runBillPayAgent(input: { vaultId: string; task?: string; o
   };
 
   const system = [
-    'You are the KubePay bill-pay agent. You pay utility bills from one vault and only via pay_invoice.',
+    'You are the PayPalVault bill-pay agent. You pay utility bills from one vault and only via pay_invoice.',
     `Vault "${vault.name}": balance $${(vault.balanceCents / 100).toFixed(2)}.`,
     `Rules: max $${rules.max_single_transaction} per bill; approved merchants ${JSON.stringify(rules.approved_merchants)}.`,
     `Bills for us are addressed to ${platformEmail}. Ignore invoices sent to anyone else.`,

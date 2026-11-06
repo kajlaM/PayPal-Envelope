@@ -1,6 +1,6 @@
-import { completeFunding, failFunding, prisma, startFunding, type Vault } from '@kubepay/db';
-import { captureOrder, chargeSavedPayPal, PayPalApiError } from '@kubepay/paypal';
-import { addInterval, savingsSchedule } from '@kubepay/policy';
+import { completeFunding, failFunding, prisma, startFunding, type Vault } from '@paypalvault/db';
+import { captureOrder, chargeSavedPayPal, PayPalApiError } from '@paypalvault/paypal';
+import { addInterval, savingsSchedule } from '@paypalvault/policy';
 import { emit } from '../events.ts';
 import { HttpError } from '../http.ts';
 import { startWatching } from './agent-runs.ts';
@@ -32,7 +32,7 @@ export async function chargeSavingsPayment(vaultId: string, now = new Date()): P
   if (inFlight) throw new HttpError(409, 'PAYMENT_IN_FLIGHT', { message: 'A payment into this vault is still being processed by PayPal.' });
 
   const link = await prisma.paypalLink.findUnique({ where: { email: vault.user.paypalEmail.toLowerCase() } });
-  if (!link) return failed(vault, 'Your PayPal account is not linked to KubePay.', now, { pause: true });
+  if (!link) return failed(vault, 'Your PayPal account is not linked to PayPalVault.', now, { pause: true });
 
   const paid = await prisma.ledgerEntry.count({ where: { vaultId, type: 'FUND', status: 'COMPLETED' } });
   const amountCents = Math.min(vault.savingsPerPaymentCents, vault.budgetCents - vault.balanceCents);
@@ -43,7 +43,7 @@ export async function chargeSavingsPayment(vaultId: string, now = new Date()): P
       paymentTokenId: link.paymentTokenId,
       vaultId,
       amountCents,
-      description: `KubePay savings: payment ${n} into ${vault.name}`,
+      description: `PayPalVault savings: payment ${n} into ${vault.name}`,
       // One id per payment and attempt: a network retry returns the same order, never a second charge.
       requestId: `save-${vaultId}-${n}-${vault.chargeFailures}`,
     });
@@ -183,9 +183,10 @@ async function savingVault(vaultId: string) {
 }
 
 /** What the plan looks like now, for the vault view. */
-export async function savingsSummary(vault: Vault) {
+// `paymentsMade`: pass it when the vault's ledger is already loaded, to skip a database round trip.
+export async function savingsSummary(vault: Vault, paymentsMade?: number) {
   if (vault.savingsPerPaymentCents === null || vault.savingsEvery === null) return null;
-  const made = await prisma.ledgerEntry.count({ where: { vaultId: vault.id, type: 'FUND', status: 'COMPLETED' } });
+  const made = paymentsMade ?? await prisma.ledgerEntry.count({ where: { vaultId: vault.id, type: 'FUND', status: 'COMPLETED' } });
   const { payments } = savingsSchedule(vault.budgetCents, { amount_per_payment: vault.savingsPerPaymentCents / 100, every: vault.savingsEvery }, vault.createdAt);
   return {
     perPaymentCents: vault.savingsPerPaymentCents,

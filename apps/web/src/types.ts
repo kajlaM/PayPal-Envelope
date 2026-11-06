@@ -1,4 +1,4 @@
-// Shapes returned by the KubePay API (apps/api). Amounts in the database are cents; policies use dollars.
+// Shapes returned by the PayPalVault API (apps/api). Amounts in the database are cents; policies use dollars.
 
 export type VaultType = 'SHOPPING' | 'UTILITY' | 'SAVINGS';
 export type VaultStatus = 'PENDING_FUNDING' | 'SAVING' | 'ACTIVE' | 'EXPIRED' | 'LIQUIDATED';

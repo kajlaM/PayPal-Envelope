@@ -1,6 +1,6 @@
 // Shopping + bill-pay agents (Step 8)
 import { runBillPayAgent } from './billpay.ts';
-import { getVault } from './kubepay.ts';
+import { getVault } from './paypalvault.ts';
 import type { AgentStep } from './runner.ts';
 import { runShoppingAgent } from './shopping.ts';
 
@@ -16,4 +16,4 @@ export async function runVaultAgent(input: { vaultId: string; task?: string; onS
   return vault.type === 'UTILITY' ? runBillPayAgent(input) : runShoppingAgent(input);
 }
 export { c3 } from './search.ts';
-export { priceHistory, priceVerdict, historyText } from './channel3.ts';
+export { priceHistory, priceVerdict, historyText, storesText, dailyPoints, lookupProduct, ProductLookupError, type LookedUpProduct } from './channel3.ts';

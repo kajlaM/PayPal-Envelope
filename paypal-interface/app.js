@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // 1. LOGIN SESSION (LOGIN <-> DASHBOARD)
   // Real login against server.ts. Each customer (kajla, jugal) is linked to a
-  // PayPal sandbox account; their vaults come from the KubePay API.
+  // PayPal sandbox account; their vaults come from the PayPalVault API.
   // =========================================================================
   const loginView = document.getElementById('loginView');
   const dashboardView = document.getElementById('dashboardView');
@@ -123,8 +123,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // =========================================================================
   // 1.5 VAULTS, LIVE BALANCE & PAYPAL LINK
-  // Everything goes through server.ts to the KubePay API (same backend as the
-  // KubePay dashboard). Live updates come from KubePay's Socket.IO events.
+  // Everything goes through server.ts to the PayPalVault API (same backend as the
+  // PayPalVault dashboard). Live updates come from PayPalVault's Socket.IO events.
   // =========================================================================
   const STATUS_PILL = {
     PENDING_FUNDING: ['Awaiting funding', 'pending-pill'],
@@ -160,7 +160,69 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   const c3StoresText = (stores) => (stores ?? []).map((st) => `${st.merchant} ${usdDollars(st.price)}`).join(' · ');
 
-  /** Photo + stores compared + 90-day price badge, for an option card (empty for non-Channel3 products). */
+  // ----- 90-day price chart (AG Charts), drawn into every .c3-chart placeholder after a render -----
+  let agChartsReady = null;
+  function loadAgCharts() {
+    agChartsReady ??= loadScript('/vendor/ag-charts.js').then(() => {
+      if (!window.agCharts?.AgCharts) throw new Error('AG Charts did not load.');
+      return window.agCharts;
+    }).catch((err) => { agChartsReady = null; throw err; });
+    return agChartsReady;
+  }
+  const C3_COLOR = { low: '#007934', typical: '#0070BA', high: '#B54708' };
+  const c3ChartData = new Map(); // placeholder id -> { points, price, mean, verdict }
+  const c3Charts = new Set(); // drawn charts, destroyed once their placeholder leaves the page
+  let c3ChartSeq = 0;
+
+  /** Placeholder for the price chart (empty when Channel3 sent no daily prices). */
+  function c3ChartHtml(history, price) {
+    if (!history?.points || history.points.length < 2) return '';
+    const id = `c3c${++c3ChartSeq}`;
+    c3ChartData.set(id, { points: history.points, price, mean: history.mean, verdict: c3Verdict(price, history) ?? 'typical' });
+    return `<div class="c3-chart" data-c3-chart="${id}" role="img" aria-label="${escapeHtml(`Price over the last ${history.days} days: low ${usdDollars(history.min)}, average ${usdDollars(history.mean)}, high ${usdDollars(history.max)}; this price ${usdDollars(price)}`)}"></div>`;
+  }
+
+  /** Draws the price charts waiting in `root`. Safe to call after every render. */
+  async function drawC3Charts(root) {
+    for (const c of c3Charts) if (!c.el.isConnected) { c.chart.destroy(); c3Charts.delete(c); }
+    const els = [...root.querySelectorAll('.c3-chart:not([data-drawn])')];
+    if (!els.length) return;
+    let AgCharts;
+    try { ({ AgCharts } = await loadAgCharts()); } catch { return; } // the text badge still says it all
+    for (const el of els) {
+      const d = c3ChartData.get(el.dataset.c3Chart);
+      if (!d || !el.isConnected || el.dataset.drawn) continue;
+      el.dataset.drawn = '1';
+      const color = C3_COLOR[d.verdict];
+      const chart = AgCharts.create({
+        container: el,
+        height: 132,
+        padding: { top: 8, right: 6, bottom: 2, left: 2 },
+        background: { visible: false },
+        legend: { enabled: false },
+        data: d.points.map(([day, price]) => ({ day: new Date(`${day}T12:00:00Z`), price })),
+        series: [{
+          type: 'line', xKey: 'day', yKey: 'price', yName: 'Price', stroke: '#0070BA', strokeWidth: 2,
+          marker: { enabled: false },
+          tooltip: { renderer: ({ datum }) => ({ title: datum.day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), content: usdDollars(datum.price) }) },
+        }],
+        axes: {
+          x: { type: 'time', position: 'bottom', label: { format: '%b %d', fontSize: 10, color: '#6C7378' }, gridLine: { enabled: false } },
+          y: {
+            type: 'number', position: 'left', nice: true,
+            label: { fontSize: 10, color: '#6C7378', formatter: ({ value }) => `$${Math.round(value)}` },
+            crossLines: [
+              { type: 'line', value: d.mean, stroke: '#9DA3A6', strokeWidth: 1, lineDash: [4, 4], label: { text: 'avg', position: 'right', fontSize: 9, color: '#6C7378' } },
+              { type: 'line', value: d.price, stroke: color, strokeWidth: 1.5, label: { text: 'this price', position: 'inside-top-left', fontSize: 9, color } },
+            ],
+          },
+        },
+      });
+      c3Charts.add({ el, chart });
+    }
+  }
+
+  /** Photo + 90-day price badge and chart + stores compared (empty for non-Channel3 products). */
   function c3Block(c3, price, merchant) {
     if (!c3) return '';
     const v = c3Verdict(price, c3.history);
@@ -170,7 +232,36 @@ document.addEventListener('DOMContentLoaded', () => {
     return `
       ${c3.image ? `<img class="c3-photo" src="${escapeHtml(c3.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
       ${v ? `<span class="c3-price c3-${v}" title="From Channel3's 90-day price history">${escapeHtml(c3HistoryText(price, c3.history))}</span>` : ''}
-      ${stores}`;
+      ${c3ChartHtml(c3.history, price)}
+      ${stores}
+      ${c3.saved ? `<span class="c3-saved">${usdDollars(c3.saved)} less than the most expensive store</span>` : ''}`;
+  }
+
+  /**
+   * What Channel3 saved on this vault's purchases: vs the most expensive store selling the same
+   * model, and vs each product's 90-day average. From the purchases' Channel3 data.
+   */
+  function c3SavingsOf(v) {
+    const byId = new Map((v.decisions ?? []).map((d) => [d.id, d]));
+    let stores = 0, average = 0, count = 0;
+    for (const e of v.ledger ?? []) {
+      if (e.type !== 'SPEND' || e.status === 'FAILED' || !e.decisionId) continue;
+      const c3 = byId.get(e.decisionId)?.requestJson?.channel3;
+      if (!c3) continue;
+      count += 1;
+      stores += Math.round((c3.saved ?? 0) * 100);
+      if (c3.history) average += Math.max(0, Math.round(c3.history.mean * 100) - e.amountCents);
+    }
+    return { storesCents: stores, averageCents: average, purchases: count };
+  }
+
+  function c3SavingsText(s) {
+    if (!s?.purchases) return '';
+    const parts = [
+      s.storesCents ? `${usd(s.storesCents)} less than the most expensive store` : '',
+      s.averageCents ? `${usd(s.averageCents)} below the 90-day average price` : '',
+    ].filter(Boolean);
+    return parts.length ? parts.join(' • ') : `Every purchase checked against other stores and its 90-day price`;
   }
   const c3Tag = `<span class="c3-tag" title="Product data, photos, store prices and price history from the Channel3 API">Product data: Channel3</span>`;
 
@@ -421,7 +512,10 @@ document.addEventListener('DOMContentLoaded', () => {
         balanceCents = result.cents;
         amountEl.textContent = usd(result.cents).replace('$', '');
         primaryEl.textContent = usd(result.cents);
-        subtext.textContent = `Live PayPal sandbox balance (${email}) • checked ${new Date(result.readAt).toLocaleTimeString()}`;
+        const checked = `checked ${new Date(result.readAt).toLocaleTimeString()}`;
+        subtext.textContent = result.unclaimed
+          ? `Waiting to be accepted on PayPal (${email}) • ${checked}. Until it is accepted, vault payments come from your bank or card.`
+          : `Live PayPal sandbox balance (${email}) • ${checked}`;
       } else if (result.status === 'NO_PASSWORD') {
         balanceCents = null;
         amountEl.textContent = '–';
@@ -436,6 +530,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if (err.status === 401) setView('login');
     }
   }
+
+  // Money moved (a vault payment, purchase or refund, also ones the server makes on its own): read the
+  // balance from PayPal now, and once more shortly after, since PayPal's page can lag a few seconds.
+  let balanceRecheck;
+  function balanceMoved() {
+    if (!currentUser) return;
+    loadBalance({ fresh: true });
+    clearTimeout(balanceRecheck);
+    balanceRecheck = setTimeout(() => currentUser && loadBalance({ fresh: true }), 15_000);
+  }
+
+  // Also re-check every minute while the page is open (the server caches reads for 30 s).
+  setInterval(() => {
+    if (currentUser && document.visibilityState === 'visible') loadBalance();
+  }, 60_000);
 
   async function refreshAccount() {
     try {
@@ -487,6 +596,13 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="vault-progress-bar">
           <div class="vault-progress-fill" style="width: ${pct}%;"></div>
         </div>
+        ${(() => { const line = ppSummary(v.verification); return line ? `<div class="vault-pp-check pp-summary-${line.cls}">${escapeHtml(line.text)}</div>` : ''; })()}
+        ${v.channel3?.storesCents || v.channel3?.averageCents
+          ? `<div class="vault-c3-saved" title="Compared by Channel3 across approved stores and against the 90-day price">💰 ${[
+              v.channel3.storesCents ? `${usd(v.channel3.storesCents)} saved vs other stores` : '',
+              v.channel3.averageCents ? `${usd(v.channel3.averageCents)} under the 90-day avg` : '',
+            ].filter(Boolean).join(' · ')} (Channel3)</div>`
+          : ''}
       </div>
       <div class="vault-footer-row">
         <span class="vault-policy-badge">${v.status === 'PENDING_FUNDING'
@@ -553,6 +669,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Header pill: what Channel3's store comparison saved across all of this customer's vaults.
+  function renderC3Total(vaults) {
+    const el = document.getElementById('c3Total');
+    if (!el) return;
+    const stores = vaults.reduce((n, v) => n + (v.channel3?.storesCents ?? 0), 0);
+    const average = vaults.reduce((n, v) => n + (v.channel3?.averageCents ?? 0), 0);
+    el.textContent = stores || average ? `💰 Channel3 saved you ${usd(stores || average)}` : '';
+    el.title = stores || average
+      ? [stores ? `${usd(stores)} less than the most expensive store` : '', average ? `${usd(average)} below 90-day average prices` : ''].filter(Boolean).join(' · ')
+      : '';
+    el.classList.toggle('hidden', !(stores || average));
+  }
+
   async function loadVaults() {
     loadRequests();
     const container = document.getElementById('vaultsContainer');
@@ -560,6 +689,7 @@ document.addEventListener('DOMContentLoaded', () => {
     status.className = 'vaults-empty';
     try {
       const vaults = await request('/me/vaults');
+      renderC3Total(vaults);
       const live = vaults.filter((v) => !isFinished(v));
       container.replaceChildren(...live.map(vaultCard));
       if (live.length === 0) {
@@ -571,7 +701,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderVaultHistory(vaults.filter(isFinished));
     } catch (err) {
       if (err.status === 401) return setView('login');
-      status.textContent = `Could not load your vaults (${err.message}). Is the KubePay API running?`;
+      status.textContent = `Could not load your vaults (${err.message}). Is the PayPalVault API running?`;
       container.replaceChildren(status);
     }
   }
@@ -742,12 +872,77 @@ document.addEventListener('DOMContentLoaded', () => {
     const payLaterBox = document.getElementById('vaultPayLaterBox');
     payLaterBox.classList.add('hidden');
     payLaterBox.innerHTML = '';
+    resetProductLink(!!vault);
     showVaultStep('describe');
     openModal(vaultDialog);
     (vault ? descInput : amountInput).focus();
   }
 
   document.getElementById('createVaultBtn').addEventListener('click', () => openVaultDialog(null));
+
+  // ----- Start from a product link (Channel3 /v1/lookup): fills in the amount and description -----
+  const linkInput = document.getElementById('vaultLinkInput');
+  const linkBtn = document.getElementById('vaultLinkBtn');
+  const linkResult = document.getElementById('vaultLinkResult');
+  let linkLookupSeq = 0;
+
+  function resetProductLink(editing) {
+    linkLookupSeq += 1; // a lookup still running is ignored
+    document.getElementById('vaultLinkGroup').classList.toggle('hidden', editing);
+    linkInput.value = '';
+    linkBtn.disabled = false;
+    linkResult.classList.add('hidden');
+    linkResult.innerHTML = '';
+  }
+
+  function productCard(p) {
+    const verdict = p.price !== null ? c3Verdict(p.price, p.history) : null;
+    const offers = p.offers.length > 1 || (p.offers[0] && p.offers[0].shop !== p.shop)
+      ? `<ul class="c3-stores">${p.offers.map((o) => `<li class="${o.shop === p.shop ? 'is-pick' : ''}"><span>${escapeHtml(o.approvedShop ?? o.shop)}${o.approvedShop ? ' ✓' : ''}</span><span>${usdDollars(o.price)}</span></li>`).join('')}</ul>`
+      : '';
+    return `
+      <div class="link-product">
+        ${p.image ? `<img class="c3-photo" src="${escapeHtml(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}
+        <div class="link-product-info">
+          <strong>${escapeHtml(p.title)}</strong>
+          <span class="muted small">${escapeHtml([p.brand, p.shop].filter(Boolean).join(' • '))}${p.price !== null ? ` • ${usdDollars(p.price)}` : ''}</span>
+          ${verdict ? `<span class="c3-price c3-${verdict}">${escapeHtml(c3HistoryText(p.price, p.history))}</span>` : ''}
+        </div>
+      </div>
+      ${p.price !== null ? c3ChartHtml(p.history, p.price) : ''}
+      ${offers}
+      <p class="muted small">${p.approvedShop
+        ? `${escapeHtml(p.approvedShop)} is one of your approved shops.`
+        : `${escapeHtml(p.shop)} is not an approved shop: the AI looks for this model at your approved shops.`}
+        Channel3 now tracks this price. Set a lower amount and the AI waits for the price to drop to it. ${c3Tag}</p>`;
+  }
+
+  async function lookUpProductLink() {
+    const url = linkInput.value.trim();
+    if (!url) return linkInput.focus();
+    const seq = ++linkLookupSeq;
+    linkBtn.disabled = true;
+    linkResult.classList.remove('hidden');
+    linkResult.innerHTML = '<p class="muted small">Asking Channel3 about this product… (up to ~20 seconds for a page it has not seen)</p>';
+    try {
+      const p = await request('/me/product-lookup', { url });
+      if (seq !== linkLookupSeq) return;
+      linkResult.innerHTML = productCard(p);
+      drawC3Charts(linkResult);
+      // Fill in the amount and the description (both stay editable).
+      const shopName = p.approvedShop ?? p.offers.find((o) => o.approvedShop)?.approvedShop ?? null;
+      if (p.price !== null) amountInput.value = Math.ceil(p.price).toFixed(2);
+      descInput.value = `Buy the ${p.title}${p.brand && !p.title.toLowerCase().includes(p.brand.toLowerCase()) ? ` (${p.brand})` : ''}${shopName ? ` from ${shopName}` : ''}${p.price !== null ? `, max $${Math.ceil(p.price)}` : ''}`;
+    } catch (err) {
+      if (seq !== linkLookupSeq) return;
+      if (err.status === 401) return setView('login');
+      linkResult.innerHTML = `<p class="form-error">${escapeHtml(err.message)}</p>`;
+    } finally {
+      if (seq === linkLookupSeq) linkBtn.disabled = false;
+    }
+  }
+  linkBtn.addEventListener('click', lookUpProductLink);
+  linkInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); lookUpProductLink(); } });
 
   vaultSteps.describe.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1112,6 +1307,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Activity: every major event, oldest first, then what comes next (a tracker like an order's status).
   // kind: done | wait (needs you / pending) | block (blocked, rejected, cancelled, failed) | future
+  // ----- "Verified by PayPal": each payment's last read-only check against PayPal's own records -----
+  const PP_CHECK = {
+    VERIFIED: ['✅', 'Verified by PayPal', 'ok'],
+    WAITING: ['⏳', 'Waiting for PayPal', 'wait'],
+    MISMATCH: ['⚠️', 'PayPal shows something different', 'bad'],
+  };
+  function ppBadge(e) {
+    const c = PP_CHECK[e.paypalCheck];
+    return c ? `<span class="pp-check pp-check-${c[2]}" title="${escapeHtml(e.paypalCheckNote ?? c[1])}">${c[0]} ${c[1]}</span>` : '';
+  }
+  function ppSub(e) {
+    return [
+      e.paypalCheck === 'MISMATCH' || e.paypalCheck === 'WAITING' ? escapeHtml(e.paypalCheckNote ?? '') : '',
+      e.paypalTxnId ? `PayPal ref <code>${escapeHtml(e.paypalTxnId)}</code>` : '',
+    ].filter(Boolean).join(' • ');
+  }
+  /** Summary of a vault's checks, from its ledger (detail) or from the list's `verification`. */
+  function ppSummary(sum) {
+    if (!sum?.checkedAt) return null;
+    const at = when(sum.checkedAt);
+    if (sum.mismatch) return { cls: 'bad', text: `⚠️ ${sum.mismatch} payment${sum.mismatch > 1 ? 's' : ''} PayPal shows differently · checked ${at}` };
+    if (sum.waiting) return { cls: 'wait', text: `⏳ ${sum.verified} verified, ${sum.waiting} waiting for PayPal · checked ${at}` };
+    if (sum.verified) return { cls: 'ok', text: `✅ Verified by PayPal · checked ${at}` };
+    return null;
+  }
+  function ppSummaryOf(v) {
+    const ledger = v.ledger ?? [];
+    const count = (c) => ledger.filter((e) => e.paypalCheck === c).length;
+    const checkedAt = ledger.map((e) => e.paypalCheckedAt).filter(Boolean).sort().at(-1) ?? null;
+    return { verified: count('VERIFIED'), waiting: count('WAITING'), mismatch: count('MISMATCH'), unchecked: count('UNCHECKED'), notYet: ledger.filter((e) => !e.paypalCheck).length, checkedAt };
+  }
+
   function timelineEvents(v) {
     const ev = [];
     const saving = v.savingsPerPaymentCents !== null && v.savingsPerPaymentCents !== undefined;
@@ -1131,7 +1358,8 @@ document.addEventListener('DOMContentLoaded', () => {
         : e.type === 'SPEND' ? `Paid ${amount} to ${escapeHtml(e.merchant?.name ?? 'merchant')}${e.paidVia === 'CHECKOUT' ? ' <span class="checkout-badge" title="Paid with PayPal Checkout: a real PayPal purchase with buyer protection">🛡 PayPal Checkout</span>' : ''}`
         : `${amount} refunded to your PayPal`;
       const kind = e.status === 'COMPLETED' ? 'done' : e.status === 'PENDING' ? 'wait' : 'block';
-      ev.push({ at: e.createdAt, title, sub: e.status === 'COMPLETED' ? '' : e.status.toLowerCase(), kind });
+      const sub = [e.status === 'COMPLETED' ? '' : e.status.toLowerCase(), ppSub(e)].filter(Boolean).join(' • ');
+      ev.push({ at: e.createdAt, title: `${title} ${ppBadge(e)}`, sub, kind });
     }
     for (const d of v.decisions ?? []) {
       const req = d.requestJson ?? {};
@@ -1299,6 +1527,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
       ${fundSection(v)}
 
+      ${(() => {
+        const saved = c3SavingsOf(v);
+        const text = c3SavingsText(saved);
+        return text ? `
+      <section class="vd-section vd-c3-savings">
+        <h3>💰 Saved with Channel3 ${c3Tag}</h3>
+        <p>${escapeHtml(text)}</p>
+        <p class="muted small">${saved.purchases} purchase${saved.purchases === 1 ? '' : 's'} compared across approved stores and against ${saved.purchases === 1 ? 'its' : 'their'} 90-day price history.</p>
+      </section>` : '';
+      })()}
+
       ${sv ? `
       <section class="vd-section vd-savings">
         <h3>${v.status === 'SAVING' ? '🐷 Saving up' : '🎉 Goal reached'} <span class="muted small">(${usd(sv.perPaymentCents)} every ${EVERY[sv.every]})</span></h3>
@@ -1351,10 +1590,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       ${pending.length ? `
       <section class="vd-section vd-approvals">
-        <h3>Needs your approval</h3>
+        <h3>Needs your approval${pending.some((d) => d.requestJson?.channel3) ? ` ${c3Tag}` : ''}</h3>
         ${pending.map((d) => {
           const req = d.requestJson ?? {};
-          return `<div class="vd-approval">
+          return `<div class="vd-approval${req.channel3 ? ' has-c3' : ''}">
+            ${req.channel3 ? `<div class="vd-approval-c3">${c3Block(req.channel3, req.verified_price ?? req.amount, req.merchant)}</div>` : ''}
             <div><strong>${usdDollars(req.amount)} at ${escapeHtml(req.merchant)}</strong>
               <div class="muted">${escapeHtml(req.reason ?? '')}${req.product_url ? ` • <a href="${escapeHtml(req.product_url)}" target="_blank" rel="noopener">view product</a>` : ''}</div>
               <div class="muted small">Why: ${reasons(d.reasons)}</div></div>
@@ -1406,6 +1646,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('')}</ol>
       </section>` : ''}
 
+      ${(v.ledger ?? []).length ? (() => {
+        const sum = ppSummaryOf(v);
+        const line = ppSummary(sum);
+        const mismatches = (v.ledger ?? []).filter((e) => e.paypalCheck === 'MISMATCH');
+        return `
+      <section class="vd-section vd-verify">
+        <h3>Verified by PayPal</h3>
+        <p class="pp-summary ${line ? `pp-summary-${line.cls}` : ''}">${line ? escapeHtml(line.text) : 'Not checked against PayPal yet.'}</p>
+        ${mismatches.map((e) => `<p class="form-error small">⚠️ ${escapeHtml(e.paypalCheckNote ?? '')}${e.paypalTxnId ? ` (PayPal ref ${escapeHtml(e.paypalTxnId)})` : ''}</p>`).join('')}
+        <p class="muted small">All vault money sits in one PayPal account; the split into vaults is PayPalVault's ledger. This asks PayPal about every payment (amount, status, who was paid) so you don't have to take the ledger's word for it. It only reads from PayPal and never moves money. Checked every night too.</p>
+        <div class="vd-approval-actions"><button type="button" class="btn-ghost-sm" data-action="verify">Verify now</button></div>
+      </section>`;
+      })() : ''}
+
       <section class="vd-section">
         <h3>Activity</h3>
         ${timelineHtml(activity)}
@@ -1417,6 +1671,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <button type="button" class="btn btn-secondary" data-action="liquidate">${v.status === 'SAVING' ? 'Stop saving &amp; refund' : 'Close vault &amp; refund'} ${usd(v.balanceCents)}</button>
       </section>` : ''}
     `;
+    drawC3Charts(detailBody);
     detailBody.querySelectorAll('.approve-password').forEach((el) => { el.value = typed[el.dataset.decision] ?? ''; });
     detailBody.querySelectorAll('.choose-password').forEach((el) => { el.value = typed[`p:${el.dataset.proposal}`] ?? ''; });
     const savingsPassword = detailBody.querySelector('.savings-password');
@@ -1483,7 +1738,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     button.disabled = true;
     try {
-      if (action === 'run-agent') {
+      if (action === 'verify') {
+        button.textContent = 'Asking PayPal…';
+        const r = await request(`/me/vaults/${id}/verify`, {});
+        showToast(r.mismatches.length
+          ? `PayPal shows ${r.mismatches.length} difference${r.mismatches.length > 1 ? 's' : ''}. See the details below.`
+          : `✅ PayPal confirms ${r.counts.VERIFIED} payment${r.counts.VERIFIED === 1 ? '' : 's'}${r.counts.WAITING ? ` (${r.counts.WAITING} still processing)` : ''}.`,
+          r.mismatches.length ? 'info' : 'success');
+      } else if (action === 'run-agent') {
         await request(`/me/vaults/${id}/agent`, {});
         showToast('AI agent started. Watch its steps here.', 'success');
       } else if (action === 'stop-agent') {
@@ -1499,7 +1761,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!password) throw new Error('Enter your password to approve.');
         button.textContent = 'Paying…';
         await request(`/me/vaults/${id}/decisions/${decision}/approve`, { password });
-        showToast('Approved. KubePay is paying the shop.', 'success');
+        showToast('Approved. PayPalVault is paying the shop.', 'success');
       } else if (action === 'reject') {
         await request(`/me/vaults/${id}/decisions/${decision}/reject`, {});
         showToast('Rejected. The agent will look for something else.', 'info');
@@ -1512,7 +1774,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.decision?.result === 'NEEDS_HUMAN') {
           showToast(`One more check: ${reasons(result.decision.reasons)}. Approve it below.`, 'info');
         } else {
-          showToast('Done. KubePay is paying the shop.', 'success');
+          showToast('Done. PayPalVault is paying the shop.', 'success');
         }
       } else if (action === 'reject-options') {
         await request(`/me/vaults/${id}/proposals/${button.dataset.proposal}/reject`, {});
@@ -1609,7 +1871,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function loadBryntum() {
     bryntumReady ??= Promise.all([
       loadStyle(`${BRYNTUM}/bryntum.css`),
-      loadScript(`${BRYNTUM}/bryntum.js`),
+      loadScript('/bryntum-license.js').then(() => loadScript(`${BRYNTUM}/bryntum.js`)),
     ]).then(() => {
       if (!window.Bryntum?.Calendar) throw new Error('Bryntum did not load.');
       return window.Bryntum;
@@ -1916,10 +2178,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return ok;
   }
 
-  async function loadCalendarVaults() {
-    const list = await request('/me/vaults');
-    return Promise.all(list.map((v) => request(`/me/vaults/${encodeURIComponent(v.id)}`).catch(() => v)));
-  }
+  // Every vault with its full details in one request (was one request per vault: ~17 s for 27 vaults).
+  const loadCalendarVaults = () => request('/me/vaults/details');
 
   async function refreshVaultCalendar() {
     const [{ Calendar }, vaults] = await Promise.all([loadBryntum(), loadCalendarVaults()]);
@@ -2550,7 +2810,7 @@ document.addEventListener('DOMContentLoaded', () => {
         html: `<div class="cal-confirm-vault">${escapeHtml(v.name)}</div><div class="cal-confirm-change"><span>The agent wants to buy</span><strong>${escapeHtml(what.replace(/^Approve /, ''))}</strong></div>`,
         save: (password) => request(`/me/vaults/${id}/decisions/${btn.dataset.id}/approve`, { password }),
       });
-      if (ok) Toast.show('Approved. KubePay is paying the shop.');
+      if (ok) Toast.show('Approved. PayPalVault is paying the shop.');
     } else if (btn.dataset.board === 'pick') {
       const title = btn.closest('li')?.querySelector('a')?.textContent ?? 'this option';
       ok = await confirmWithPassword({
@@ -2558,7 +2818,7 @@ document.addEventListener('DOMContentLoaded', () => {
         html: `<div class="cal-confirm-vault">${escapeHtml(v.name)}</div><div class="cal-confirm-change"><span>You pick</span><strong>${escapeHtml(title)}</strong></div>`,
         save: (password) => request(`/me/vaults/${id}/proposals/${btn.dataset.id}/choose`, { index: Number(btn.dataset.index), password }),
       });
-      if (ok) Toast.show('Picked. KubePay is paying the shop.');
+      if (ok) Toast.show('Picked. PayPalVault is paying the shop.');
     }
     if (ok) { tlDetails.innerHTML = tlDetailsEmpty; refreshTimelineSoon(); loadVaults(); }
   });
@@ -2776,6 +3036,11 @@ document.addEventListener('DOMContentLoaded', () => {
               cellRenderer: (p) => p.value === undefined ? '' : `<span class="${p.value >= 0 ? 'st-amount-in' : 'st-amount-out'}">${p.value >= 0 ? '+' : '−'}${usd(Math.round(Math.abs(p.value) * 100))}</span>`,
             },
             { field: 'status', headerName: 'Status', width: 120, cellRenderer: (p) => { const s = ST_STATUS[p.value]; return s ? `<span class="st-pill ${s[1]}">${s[0]}</span>` : ''; } },
+            {
+              field: 'paypalCheck', headerName: 'PayPal check', width: 150, headerTooltip: 'Checked against PayPal\'s own records (read-only)',
+              tooltipValueGetter: (p) => p.data?.paypalCheckNote ?? '',
+              cellRenderer: (p) => { const c = PP_CHECK[p.value]; return c ? `<span class="st-pill ${c[2]}">${c[0]} ${c[2] === 'ok' ? 'Verified' : c[2] === 'wait' ? 'Waiting' : 'Differs'}</span>` : (p.data?.__total ? '' : '<span class="muted small">Not checked</span>'); },
+            },
             { field: 'paypalRef', headerName: 'PayPal ref', width: 170, hide: window.innerWidth < 1100 },
           ],
           isExternalFilterPresent: () => Boolean(stType),
@@ -2842,7 +3107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape' && tlVaultId && !document.querySelector('.b-popup.cal-confirm')) closeVaultTimeline();
   });
 
-  // ---------- Live updates from KubePay (Socket.IO) ----------
+  // ---------- Live updates from PayPalVault (Socket.IO) ----------
 
   let liveStarted = false;
   let refreshTimer;
@@ -2873,13 +3138,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (liveStarted) return;
     liveStarted = true;
     try {
-      // Same origin: server.ts passes /socket.io through to the KubePay API (works behind the tunnel).
+      // Same origin: server.ts passes /socket.io through to the PayPalVault API (works behind the tunnel).
       if (!window.io) await loadScript('/socket.io/socket.io.js');
       const socket = window.io();
       socket.on('connect', refreshSoon);
       socket.on('vault:updated', refreshSoon);
       socket.on('decision:created', refreshSoon);
-      socket.on('ledger:updated', refreshSoon);
+      socket.on('ledger:updated', () => { refreshSoon(); balanceMoved(); });
       socket.on('proposal:created', refreshSoon);
       socket.on('agent:step', (step) => {
         (agentSteps[step.vaultId] ??= []).push({ ...step, at: Date.now() });

@@ -1,6 +1,6 @@
-import { failOutflow, LedgerError, prisma, reserveSpend, type Decision } from '@kubepay/db';
-import { PayPalApiError, sendPayout } from '@kubepay/paypal';
-import { evaluate, SpendRequestSchema, toCents, type Decision as Verdict, type Policy, type SpendRequest, type VaultSnapshot } from '@kubepay/policy';
+import { failOutflow, LedgerError, prisma, reserveSpend, type Decision } from '@paypalvault/db';
+import { PayPalApiError, sendPayout } from '@paypalvault/paypal';
+import { evaluate, SpendRequestSchema, toCents, type Decision as Verdict, type Policy, type SpendRequest, type VaultSnapshot } from '@paypalvault/policy';
 import { emit } from '../events.ts';
 import { HttpError } from '../http.ts';
 import { payWithCheckout } from './checkout.ts';
@@ -88,7 +88,7 @@ export async function executeSpend(decisionId: string) {
       ledgerEntryId: entry.id,
       receiverEmail: merchant.sandboxEmail,
       amountCents,
-      note: `KubePay payment to ${merchant.name}: ${request.reason}`.slice(0, 1000),
+      note: `PayPalVault payment to ${merchant.name}: ${request.reason}`.slice(0, 1000),
     });
     const updated = await prisma.ledgerEntry.update({ where: { id: entry.id }, data: { paypalRef: payout.payoutBatchId, paidVia: 'PAYOUTS' } });
     emit('ledger:updated', { vaultId: decision.vaultId, entryId: entry.id });

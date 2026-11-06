@@ -45,7 +45,7 @@ export function App() {
             K
           </span>
           <div>
-            <h1>KubePay AI</h1>
+            <h1>PayPalVault</h1>
             <p>Spending vaults for AI agents · PayPal sandbox</p>
           </div>
         </div>

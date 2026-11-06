@@ -1,6 +1,6 @@
 // Builds the Bryntum bundle the site loads (paypal-interface/vendor/bryntum.{js,css} + fonts).
 // Run: npm run build:bryntum. The site server also runs it on start when the bundle is missing.
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
@@ -29,8 +29,15 @@ export async function buildBryntum() {
   });
 }
 
+// Rebuilds when the bundle is missing, or older than the entry files or the installed Bryntum version.
 export async function ensureBryntum() {
-  if (!existsSync(`${BRYNTUM_OUT}/bryntum.js`) || !existsSync(`${BRYNTUM_OUT}/bryntum.css`)) await buildBryntum();
+  const out = [`${BRYNTUM_OUT}/bryntum.js`, `${BRYNTUM_OUT}/bryntum.css`];
+  if (out.some((f) => !existsSync(f))) return buildBryntum();
+  const builtAt = Math.min(...out.map((f) => statSync(f).mtimeMs));
+  // npm gives installed files a fixed old date, so the lockfile stands in for "packages changed".
+  const lock = fileURLToPath(new URL('../package-lock.json', import.meta.url));
+  const inputs = [`${site}bryntum/entry.js`, `${site}bryntum/entry.css`, lock].filter((f) => existsSync(f));
+  if (inputs.some((f) => statSync(f).mtimeMs > builtAt)) await buildBryntum();
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -1,7 +1,5 @@
 import { CheckoutPaymentIntent } from '@paypal/paypal-server-sdk';
-import { sdk } from './sdk.ts';
-import { platformCredentials } from './config.ts';
-import { paypalRequest } from './http.ts';
+import { paypalSdk } from './sdk.ts';
 import { centsToValue, CURRENCY, valueToCents } from './money.ts';
 
 // Orders API v2: the user funds a vault through the PayPal button.
@@ -14,7 +12,7 @@ export async function createOrder(input: {
   requestId?: string;
   mockResponse?: string;
 }) {
-  const { result } = await sdk().orders.createOrder({
+  const result = await paypalSdk((c) => c.orders.createOrder({
     paypalRequestId: input.requestId,
     paypalMockResponse: input.mockResponse,
     body: {
@@ -27,7 +25,7 @@ export async function createOrder(input: {
         },
       ],
     },
-  });
+  }));
   return {
     orderId: result.id!,
     status: result.status!,
@@ -37,11 +35,11 @@ export async function createOrder(input: {
 
 /** POST /v2/checkout/orders/{id}/capture. Call after the user approves in the popup. */
 export async function captureOrder(orderId: string, opts: { requestId?: string; mockResponse?: string } = {}) {
-  const { result } = await sdk().orders.captureOrder({
+  const result = await paypalSdk((c) => c.orders.captureOrder({
     id: orderId,
     paypalRequestId: opts.requestId ?? `capture-${orderId}`,
     paypalMockResponse: opts.mockResponse,
-  });
+  }));
   const capture = result.purchaseUnits?.[0]?.payments?.captures?.[0];
   return {
     orderId: result.id!,
@@ -55,7 +53,7 @@ export async function captureOrder(orderId: string, opts: { requestId?: string; 
 
 /** GET /v2/checkout/orders/{id} */
 export async function getOrder(orderId: string) {
-  const { result } = await sdk().orders.getOrder({ id: orderId });
+  const result = await paypalSdk((c) => c.orders.getOrder({ id: orderId }));
   return result;
 }
 
@@ -71,20 +69,20 @@ export async function chargeSavedPayPal(input: {
   description: string;
   requestId?: string;
 }) {
-  const body = await paypalRequest(platformCredentials(), 'POST', '/v2/checkout/orders', {
-    requestId: input.requestId ?? `fund-saved-${input.vaultId}`,
+  const result = await paypalSdk((c) => c.orders.createOrder({
+    paypalRequestId: input.requestId ?? `fund-saved-${input.vaultId}`,
     body: {
-      intent: 'CAPTURE',
-      purchase_units: [
+      intent: CheckoutPaymentIntent.Capture,
+      purchaseUnits: [
         {
-          custom_id: input.vaultId,
+          customId: input.vaultId,
           description: input.description.slice(0, 127),
-          amount: { currency_code: CURRENCY, value: centsToValue(input.amountCents) },
+          amount: { currencyCode: CURRENCY, value: centsToValue(input.amountCents) },
         },
       ],
-      payment_source: { paypal: { vault_id: input.paymentTokenId } },
+      paymentSource: { paypal: { vaultId: input.paymentTokenId } },
     },
-  });
-  const capture = body.purchase_units?.[0]?.payments?.captures?.[0];
-  return { orderId: body.id as string, status: body.status as string, captureStatus: capture?.status as string | undefined };
+  }));
+  const capture = result.purchaseUnits?.[0]?.payments?.captures?.[0];
+  return { orderId: result.id!, status: result.status!, captureStatus: capture?.status as string | undefined };
 }

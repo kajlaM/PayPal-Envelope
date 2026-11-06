@@ -1,54 +1,22 @@
-import { platformCredentials } from './config.ts';
-import { paypalRequest } from './http.ts';
+import { CheckoutPaymentIntent } from '@paypal/paypal-server-sdk';
 import { centsToValue, CURRENCY } from './money.ts';
+import { paypalSdk } from './sdk.ts';
+import { createPayPalSetupToken, createPaymentToken } from './vault.ts';
 
 // Paying a merchant with PayPal Checkout (Orders API v2) instead of Payouts.
-// The vault still pays by itself: the money is in the KubePay platform account, and the platform
+// The vault still pays by itself: the money is in the PayPalVault platform account, and the platform
 // pays the merchant from its own saved PayPal account (Vault API payment token, made once with
 // `npm run setup:checkout -w apps/api`). No popup, and each purchase is a real PayPal
 // purchase (merchant = payee), so it gets PayPal buyer protection, a receipt and a refund button.
 
-/** POST /v3/vault/setup-tokens: the page where the platform account approves being saved (once). */
-export async function startPlatformCheckoutLink(urls: { returnUrl: string; cancelUrl: string }) {
-  const body = await paypalRequest(platformCredentials(), 'POST', '/v3/vault/setup-tokens', {
-    body: {
-      payment_source: {
-        paypal: {
-          usage_type: 'MERCHANT',
-          customer_type: 'CONSUMER',
-          description: 'KubePay platform: pay shops for vault purchases',
-          experience_context: {
-            brand_name: 'KubePay',
-            shipping_preference: 'NO_SHIPPING',
-            return_url: urls.returnUrl,
-            cancel_url: urls.cancelUrl,
-          },
-        },
-      },
-    },
-  });
-  const approveUrl: string | undefined = body.links?.find((l: any) => l.rel === 'approve')?.href;
-  if (!approveUrl) throw new Error('PayPal did not return an approval link');
-  return { setupTokenId: body.id as string, approveUrl };
+/** The page where the platform account approves being saved (once). Vault API, through the SDK. */
+export function startPlatformCheckoutLink(urls: { returnUrl: string; cancelUrl: string }) {
+  return createPayPalSetupToken({ description: 'PayPalVault platform: pay shops for vault purchases', ...urls });
 }
 
-/** GET /v3/vault/setup-tokens/{id}: "APPROVED" once the account approved it. */
-export async function getSetupTokenStatus(setupTokenId: string): Promise<string> {
-  const body = await paypalRequest(platformCredentials(), 'GET', `/v3/vault/setup-tokens/${setupTokenId}`);
-  return body.status as string;
-}
-
-/** POST /v3/vault/payment-tokens: the approved setup token becomes a saved PayPal account. */
-export async function finishPlatformCheckoutLink(setupTokenId: string) {
-  const token = await paypalRequest(platformCredentials(), 'POST', '/v3/vault/payment-tokens', {
-    requestId: `platform-link-${setupTokenId}`,
-    body: { payment_source: { token: { id: setupTokenId, type: 'SETUP_TOKEN' } } },
-  });
-  return {
-    paymentTokenId: token.id as string,
-    customerId: (token.customer?.id as string | undefined) ?? '',
-    email: (token.payment_source?.paypal?.email_address as string | undefined) ?? '',
-  };
+/** The approved setup token becomes the platform's saved PayPal account. */
+export function finishPlatformCheckoutLink(setupTokenId: string) {
+  return createPaymentToken(setupTokenId, `platform-link-${setupTokenId}`);
 }
 
 export type CheckoutPayment = {
@@ -73,37 +41,54 @@ export async function payMerchantWithCheckout(input: {
   productUrl?: string;
 }): Promise<CheckoutPayment> {
   const value = centsToValue(input.amountCents);
-  const body = await paypalRequest(platformCredentials(), 'POST', '/v2/checkout/orders', {
-    requestId: `spend-${input.ledgerEntryId}`,
+  const result = await paypalSdk((c) => c.orders.createOrder({
+    paypalRequestId: `spend-${input.ledgerEntryId}`,
     body: {
-      intent: 'CAPTURE',
-      purchase_units: [
+      intent: CheckoutPaymentIntent.Capture,
+      purchaseUnits: [
         {
-          reference_id: input.ledgerEntryId,
-          custom_id: input.ledgerEntryId,
-          invoice_id: input.ledgerEntryId,
+          referenceId: input.ledgerEntryId,
+          customId: input.ledgerEntryId,
+          invoiceId: input.ledgerEntryId,
           description: input.description.slice(0, 127),
-          payee: { email_address: input.merchantEmail },
-          amount: { currency_code: CURRENCY, value, breakdown: { item_total: { currency_code: CURRENCY, value } } },
+          payee: { emailAddress: input.merchantEmail },
+          amount: { currencyCode: CURRENCY, value, breakdown: { itemTotal: { currencyCode: CURRENCY, value } } },
           items: [
             {
               name: input.itemName.slice(0, 127),
               quantity: '1',
-              unit_amount: { currency_code: CURRENCY, value },
+              unitAmount: { currencyCode: CURRENCY, value },
               ...(input.productUrl && input.productUrl.length <= 2048 ? { url: input.productUrl } : {}),
             },
           ],
         },
       ],
-      payment_source: { paypal: { vault_id: input.paymentTokenId } },
+      paymentSource: { paypal: { vaultId: input.paymentTokenId } },
     },
-  });
-  const capture = body.purchase_units?.[0]?.payments?.captures?.[0];
-  return { orderId: body.id, orderStatus: body.status, captureId: capture?.id, captureStatus: capture?.status };
+  }));
+  const capture = result.purchaseUnits?.[0]?.payments?.captures?.[0];
+  return { orderId: result.id!, orderStatus: String(result.status), captureId: capture?.id, captureStatus: capture?.status };
 }
 
 /** GET /v2/payments/captures/{id}: settles a Checkout purchase that was still PENDING. */
 export async function getCapture(captureId: string) {
-  const body = await paypalRequest(platformCredentials(), 'GET', `/v2/payments/captures/${captureId}`);
-  return { captureId: body.id as string, status: body.status as string, ledgerEntryId: body.custom_id as string | undefined };
+  const result = await paypalSdk((c) => c.payments.getCapturedPayment({ captureId }));
+  return { captureId: result.id!, status: String(result.status), ledgerEntryId: result.customId };
+}
+
+/**
+ * GET /v2/payments/captures/{id} with what a check against PayPal needs: status (COMPLETED,
+ * REFUNDED, ...), amount, custom_id (the ledger entry) and the order it belongs to (for the payee).
+ */
+export async function getCaptureDetails(captureId: string) {
+  const result = await paypalSdk((c) => c.payments.getCapturedPayment({ captureId }));
+  const up = result.links?.find((l) => l.rel === 'up')?.href ?? '';
+  return {
+    captureId: result.id!,
+    status: String(result.status),
+    amountCents: result.amount?.value ? Math.round(Number(result.amount.value) * 100) : 0,
+    customId: result.customId,
+    orderId: up.match(/\/orders\/([^/?]+)/)?.[1],
+    updatedAt: result.updateTime,
+  };
 }

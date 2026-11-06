@@ -6,8 +6,8 @@ config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) });
 
 const key = (name: string) => process.env[name]?.trim() || undefined;
 
-/** Where the KubePay API runs. Agents spend only through it. */
-export const apiUrl = () => (key('KUBEPAY_API_URL') ?? `http://localhost:${key('PORT') ?? 4000}`).replace(/\/$/, '');
+/** Where the PayPalVault API runs. Agents spend only through it. */
+export const apiUrl = () => (key('PAYPALVAULT_API_URL') ?? `http://localhost:${key('PORT') ?? 4000}`).replace(/\/$/, '');
 
 export const internalKey = () => {
   const value = key('INTERNAL_API_KEY');

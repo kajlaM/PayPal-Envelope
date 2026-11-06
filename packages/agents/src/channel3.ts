@@ -1,6 +1,6 @@
-import type { Channel3Insight } from '@kubepay/policy';
+import type { Channel3Insight } from '@paypalvault/policy';
 import { channel3Key } from './config.ts';
-import { c3, type Product } from './search.ts';
+import { c3, mainImage, type Product } from './search.ts';
 
 // What Channel3's product data adds to a purchase decision (no AI, all deterministic):
 //  1. Compare stores: the same model at every approved store, so the agent buys where it is cheapest.
@@ -68,7 +68,11 @@ export async function priceHistory(productId: string | null | undefined): Promis
     .then((h: any): History | null => {
       const s = h?.statistics;
       if (!s || !['low', 'typical', 'high'].includes(s.current_status)) return null;
-      return { status: s.current_status, mean: round(s.mean), min: round(s.min_price), max: round(s.max_price), days: (h.history ?? []).length || 90 };
+      const points = dailyPoints(h.history);
+      return {
+        status: s.current_status, mean: round(s.mean), min: round(s.min_price), max: round(s.max_price),
+        days: points.length || 90, ...(points.length > 1 ? { points } : {}),
+      };
     })
     .catch((err: Error) => {
       console.warn('Channel3 price history failed:', err.message.slice(0, 160));
@@ -79,6 +83,20 @@ export async function priceHistory(productId: string | null | undefined): Promis
 }
 
 const round = (n: unknown) => Math.round(Number(n) * 100) / 100;
+
+/**
+ * Channel3's price points as one [day, price] per day, oldest first. Its history mixes the prices of
+ * every store selling the product, so each day keeps its lowest: the best price you could get that day.
+ */
+export function dailyPoints(history: unknown): [string, number][] {
+  const byDay = new Map<string, number>();
+  for (const p of Array.isArray(history) ? history : []) {
+    if (typeof p?.timestamp !== 'string' || !(Number(p?.price) > 0) || (p.currency && p.currency !== 'USD')) continue;
+    const day = p.timestamp.slice(0, 10);
+    byDay.set(day, Math.min(byDay.get(day) ?? Infinity, round(p.price)));
+  }
+  return [...byDay].sort(([a], [b]) => a.localeCompare(b)).slice(-120);
+}
 
 /** Everything Channel3 says about one candidate, as saved with the option / purchase request. */
 export async function insightFor(product: Product, pool: Product[]): Promise<Channel3Insight | undefined> {
@@ -115,3 +133,60 @@ export function historyText(price: number, h: History | null | undefined): strin
 
 /** "BestBuy $48.00 · Walmart $52.00 · Target $55.00" */
 export const storesText = (stores: { merchant: string; price: number }[]) => stores.map((s) => `${s.merchant} $${s.price.toFixed(2)}`).join(' · ');
+
+// ---------- Start a vault from a product link ----------
+
+export type LookedUpProduct = {
+  productId: string;
+  title: string;
+  brand: string | null;
+  image: string | null;
+  url: string; // the link the customer pasted
+  shop: string; // its store, e.g. bestbuy.com
+  price: number | null; // that store's price (dollars), when Channel3 has it
+  offers: { shop: string; price: number; url: string }[]; // every store Channel3 knows, cheapest first
+  history: History | null; // 90-day price history, with daily points for the chart
+};
+
+export class ProductLookupError extends Error {}
+
+/**
+ * Turns a store's product link into the product (Channel3 /v1/lookup), with its price history, and
+ * asks Channel3 to keep tracking its price. Can take ~20 s: Channel3 may read the page live.
+ */
+export async function lookupProduct(url: string): Promise<LookedUpProduct> {
+  if (!channel3Key()) throw new ProductLookupError('Product lookup needs CHANNEL3_API_KEY in .env.');
+  const body = await c3('/v1/lookup', { method: 'POST', body: JSON.stringify({ url }) }).catch((err: Error) => {
+    if (/Unsupported domain/i.test(err.message)) throw new ProductLookupError('Channel3 does not cover this store yet. Try a link from another store (e.g. Best Buy, Walmart, Target).');
+    if (/Unprocessable URL|\(422\)/i.test(err.message)) throw new ProductLookupError('That does not look like a product page link.');
+    throw new ProductLookupError(`Channel3 could not read that link: ${err.message.slice(0, 160)}`);
+  });
+  const p = body?.product;
+  if (!p?.id) throw new ProductLookupError('Channel3 found no product at that link.');
+
+  const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+  const shop = host(url);
+  const offers = (p.offers ?? [])
+    .filter((o: any) => Number(o?.price?.price) > 0 && (!o.price.currency || o.price.currency === 'USD'))
+    .map((o: any) => ({ shop: (o.domain ?? host(o.url)).replace(/^www\./, ''), price: round(o.price.price), url: o.url as string }))
+    .sort((a: { price: number }, b: { price: number }) => a.price - b.price);
+  const own = offers.find((o: { shop: string }) => o.shop === shop || shop.endsWith(`.${o.shop}`));
+
+  // Keep Channel3 tracking this product's price (builds the history the agent and the chart use).
+  c3('/v0/price-tracking/start', { method: 'POST', body: JSON.stringify({ canonical_product_id: p.id }) })
+    .catch((err: Error) => console.warn('Channel3 price tracking failed:', err.message.slice(0, 160)));
+  const history = await priceHistory(p.id);
+  const price = own?.price ?? offers[0]?.price ?? null;
+
+  return {
+    productId: p.id,
+    title: p.title,
+    brand: p.brands?.[0]?.name ?? null,
+    image: mainImage(p.images),
+    url,
+    shop,
+    price,
+    offers: offers.slice(0, 6),
+    history: history && price !== null ? { ...history, status: priceVerdict(price, history) } : history,
+  };
+}

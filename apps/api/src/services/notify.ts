@@ -1,8 +1,8 @@
-import { prisma } from '@kubepay/db';
+import { prisma } from '@paypalvault/db';
 import {
   controlMode, PolicySchema, ProposalOptionSchema, savingsSchedule, signApprovalLink, SpendRequestSchema, type ApprovalAction, type Policy,
-} from '@kubepay/policy';
-import { onEvent, type KubePayEvent } from '../events.ts';
+} from '@paypalvault/policy';
+import { onEvent, type PayPalVaultEvent } from '../events.ts';
 import { buildEmail, shortId, usd, type Email, type EmailAction, type EmailInput, type EmailKind, type Purchase, type VaultFacts } from './emails.ts';
 
 // Alert emails (Step 12). Every important moment of a vault (live, purchase, approval needed, blocked,
@@ -126,6 +126,7 @@ function purchaseFrom(requestJson: unknown, fallbackMerchant: string, amountCent
     merchant: r.success ? r.data.merchant : fallbackMerchant,
     amountCents: r.success ? Math.round(r.data.amount * 100) : amountCents,
     productUrl: r.success ? r.data.product_url : undefined,
+    channel3: r.success ? r.data.channel3 : undefined,
   };
 }
 
@@ -156,7 +157,7 @@ export async function alertForProposal(proposalId: string) {
   if (p.status !== 'OPEN' || !once(`proposal:${p.id}`)) return;
   const { vault, policy } = await loadVault(p.vaultId);
   const options = ProposalOptionSchema.array().parse(p.options).map((o) => ({
-    item: o.title, merchant: o.merchant, amountCents: Math.round((o.verified_price ?? o.price) * 100), productUrl: o.url,
+    item: o.title, merchant: o.merchant, amountCents: Math.round((o.verified_price ?? o.price) * 100), productUrl: o.url, channel3: o.channel3,
   }));
   const actions = present([
     ...options.map((o, i) => actionLink({ a: 'pick', v: vault.id, p: p.id, i }, `Pick ${i + 1}: ${usd(o.amountCents)} at ${o.merchant}`, 'primary')),
@@ -301,6 +302,21 @@ export async function alertEndingSoon(now = new Date()) {
   }
 }
 
+/** "Verified by PayPal" found a difference: tell the vault owner (once per difference). */
+export async function alertForMismatch(payload: { vaultId: string; entryId?: unknown; note?: unknown }) {
+  if (typeof payload.entryId !== 'string' || typeof payload.note !== 'string') return;
+  if (!once(`mismatch:${payload.entryId}:${payload.note}`)) return;
+  const e = await prisma.ledgerEntry.findUniqueOrThrow({ where: { id: payload.entryId }, include: { merchant: true } });
+  const { vault, policy } = await loadVault(e.vaultId);
+  const payment = e.type === 'FUND' ? `${usd(e.amountCents)} added to the vault`
+    : e.type === 'LIQUIDATE' ? `${usd(e.amountCents)} refunded to your PayPal`
+      : `${usd(e.amountCents)} paid to ${e.merchant?.name ?? 'a shop'}`;
+  await send(
+    { kind: 'PAYPAL_MISMATCH', vault: facts(vault, policy), payment, amountCents: e.amountCents, paypalSays: payload.note, paypalRef: e.paypalTxnId ?? e.paypalRef ?? undefined },
+    { ownerEmail: vault.user.paypalEmail, status: vault.status, amountCents: e.amountCents, merchant: e.merchant?.name ?? null, reasons: [payload.note] },
+  );
+}
+
 /** Starts sending alert emails (through Zapier) for every matching event. */
 export function startNotifications() {
   if (!hookUrl()) {
@@ -310,13 +326,14 @@ export function startNotifications() {
   if (!list(process.env.ALERT_CC).length && !list(process.env.ALERT_RECIPIENTS).length) {
     console.log('Alert emails: no ALERT_RECIPIENTS / ALERT_CC in .env, so the Zap decides where mail goes.');
   }
-  onEvent((event: KubePayEvent, payload) => {
+  onEvent((event: PayPalVaultEvent, payload) => {
     const job =
       event === 'decision:created' && typeof payload.decisionId === 'string' ? alertForDecision(payload.decisionId)
         : event === 'ledger:updated' && typeof payload.entryId === 'string' ? alertForLedgerEntry(payload.entryId)
           : event === 'policy:changed' ? alertForPolicyChange(payload as Parameters<typeof alertForPolicyChange>[0])
             : event === 'proposal:created' && typeof payload.proposalId === 'string' ? alertForProposal(payload.proposalId)
               : event === 'savings:failed' ? alertForSavingsFailure(payload as Parameters<typeof alertForSavingsFailure>[0])
+              : event === 'verify:mismatch' ? alertForMismatch(payload)
             : null;
     job?.catch((err) => console.error(`Alert email failed (${event}):`, (err as Error).message));
   });

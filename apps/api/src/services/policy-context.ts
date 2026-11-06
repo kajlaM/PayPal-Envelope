@@ -1,6 +1,6 @@
-import { prisma } from '@kubepay/db';
-import { getInvoice, PayPalApiError } from '@kubepay/paypal';
-import type { EngineContext, SpendRequest } from '@kubepay/policy';
+import { prisma } from '@paypalvault/db';
+import { getInvoice, PayPalApiError } from '@paypalvault/paypal';
+import type { EngineContext, SpendRequest } from '@paypalvault/policy';
 import { spendAnomaly } from './audit.ts';
 
 const DAY_MS = 86_400_000;

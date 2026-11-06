@@ -1,12 +1,12 @@
-import { addFunding, prisma } from '@kubepay/db';
-import type { FundRequest } from '@kubepay/db';
-import { cancelMoneyRequest, getMoneyRequest, isRequestClosed, isRequestPaid, PayPalApiError, requestMoney } from '@kubepay/paypal';
+import { addFunding, prisma } from '@paypalvault/db';
+import type { FundRequest } from '@paypalvault/db';
+import { cancelMoneyRequest, getMoneyRequest, isRequestClosed, isRequestPaid, PayPalApiError, requestMoney } from '@paypalvault/paypal';
 import { emit } from '../events.ts';
 import { HttpError } from '../http.ts';
 import { startWatching } from './agent-runs.ts';
 
 // "Ask a friend" funding. The owner asks a friend to fund a vault that is waiting for money:
-// KubePay sends a PayPal money request (Invoicing API, from the platform account) to the friend's
+// PayPalVault sends a PayPal money request (Invoicing API, from the platform account) to the friend's
 // PayPal email. When the friend pays it, the money is credited straight to the vault.
 // The result arrives by webhook (INVOICING.INVOICE.PAID), by the background tick, or by "Check now";
 // every path goes through settle(), which is safe to run twice.
@@ -33,7 +33,7 @@ export async function createFundRequest(vaultId: string, input: { payerEmail: st
   const who = input.requesterName?.trim() || vault.user.name;
   const message = input.message?.trim().slice(0, 500) || undefined;
   const note = [
-    `${who} asked you to fund the KubePay vault "${vault.name}" (${dollars(amountCents)}).`,
+    `${who} asked you to fund the PayPalVault vault "${vault.name}" (${dollars(amountCents)}).`,
     message ? `Message: "${message}"` : null,
     'Your payment goes straight into that vault. Anything it does not spend goes back to the vault owner when it closes.',
   ].filter(Boolean).join('\n');

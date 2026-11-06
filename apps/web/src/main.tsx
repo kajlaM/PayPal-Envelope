@@ -7,6 +7,10 @@ import './styles.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+// Bryntum Enterprise license (BRYNTUM_LICENSE_KEY in the repo-root .env, passed in by vite.config.ts).
+const w = window as unknown as { bryntum?: { licenseKey?: string } };
+(w.bryntum ??= {}).licenseKey = import.meta.env.VITE_BRYNTUM_LICENSE_KEY;
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

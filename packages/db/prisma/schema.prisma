@@ -35,6 +35,14 @@ enum LedgerType {
   LIQUIDATE // money out: vault -> user (Payouts, leftover balance)
 }
 
+// "Verified by PayPal": what PayPal's own records say about a ledger entry (read-only check).
+enum PayPalCheck {
+  VERIFIED  // PayPal agrees: same amount, same status, right person or shop
+  WAITING   // too new or still processing at PayPal; checked again later
+  MISMATCH  // PayPal says something different (see paypalCheckNote)
+  UNCHECKED // nothing at PayPal to compare with (e.g. never reached PayPal)
+}
+
 enum LedgerStatus {
   PENDING   // waiting for PayPal to confirm
   COMPLETED // PayPal confirmed
@@ -117,6 +125,11 @@ model LedgerEntry {
   itemId      String?      // shopping-list vaults: the list item this payment buys
   paidVia     String?      // SPEND: CHECKOUT (PayPal Checkout purchase, paypalRef = capture id) or PAYOUTS
   note        String?
+  // Last check against PayPal's records (services/verify.ts). Never moves money.
+  paypalCheck     PayPalCheck?
+  paypalCheckedAt DateTime?
+  paypalTxnId     String?   // PayPal's transaction id (capture id or payout transaction id), as shown in PayPal
+  paypalCheckNote String?   // what PayPal said, in plain words (mostly for WAITING / MISMATCH)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   vault       Vault        @relation(fields: [vaultId], references: [id])
@@ -185,7 +198,7 @@ enum FundRequestStatus {
   CANCELLED // the owner cancelled it, paid another way, or the vault expired first
 }
 
-// "Ask a friend": a PayPal money request (Invoicing API, sent by the KubePay platform account) to a
+// "Ask a friend": a PayPal money request (Invoicing API, sent by the PayPalVault platform account) to a
 // friend's PayPal email. When the friend pays it, the money goes straight into this vault.
 model FundRequest {
   id            String            @id @default(cuid())
@@ -206,7 +219,7 @@ model FundRequest {
   @@map("fund_requests")
 }
 
-// A customer's PayPal account saved with the Vault API (payment token), so KubePay can charge it
+// A customer's PayPal account saved with the Vault API (payment token), so PayPalVault can charge it
 // without a popup: the first payment into a vault, top-ups, and savings payments.
 model PaypalLink {
   email          String   @id // the PayPal (sandbox) account; matches User.paypalEmail

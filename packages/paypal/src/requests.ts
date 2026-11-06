@@ -1,8 +1,10 @@
 import { platformCredentials } from './config.ts';
 import { paypalRequest } from './http.ts';
 import { money, valueToCents } from './money.ts';
+import { invoiceSchema } from 'invoices';
+import { paypalRest } from './rest-sdk.ts';
 
-// "Ask a friend" (Invoicing API v2, called as the KubePay platform account).
+// "Ask a friend" (Invoicing API v2, called as the PayPalVault platform account).
 // The platform sends a PayPal money request to the friend's PayPal email. The friend pays it on
 // PayPal, the money lands in the platform account, and the ledger credits the vault named in
 // `detail.reference`. So the money never passes through the vault owner's own PayPal.
@@ -14,6 +16,7 @@ export type MoneyRequest = {
   paidCents: number;
   payUrl?: string; // the PayPal page where the friend pays
   vaultId?: string;
+  paymentId?: string; // PayPal's transaction id of the friend's payment, once paid
 };
 
 const PAID = ['PAID', 'MARKED_AS_PAID'];
@@ -28,6 +31,7 @@ function toRequest(raw: any): MoneyRequest {
     paidCents: raw.payments?.paid_amount?.value ? valueToCents(raw.payments.paid_amount.value) : 0,
     payUrl: raw.detail?.metadata?.recipient_view_url,
     vaultId: raw.detail?.reference,
+    paymentId: raw.payments?.transactions?.[0]?.payment_id,
   };
 }
 
@@ -48,7 +52,7 @@ export async function requestMoney(input: {
         currency_code: 'USD',
         reference: input.vaultId,
         note: input.note?.slice(0, 4000),
-        memo: `KubePay vault ${input.vaultId}`,
+        memo: `PayPalVault vault ${input.vaultId}`,
       },
       ...(platformEmail ? { invoicer: { email_address: platformEmail } } : {}),
       primary_recipients: [{ billing_info: { email_address: input.payerEmail } }],
@@ -66,7 +70,8 @@ export async function requestMoney(input: {
 
 /** GET /v2/invoicing/invoices/{id} */
 export async function getMoneyRequest(invoiceId: string): Promise<MoneyRequest> {
-  return toRequest(await paypalRequest(platformCredentials(), 'GET', `/v2/invoicing/invoices/${invoiceId}`));
+  return toRequest(await paypalRest('platform', (c) => c.invoicesApi.invoicesGet({ invoiceId }), invoiceSchema,
+    () => paypalRequest(platformCredentials(), 'GET', `/v2/invoicing/invoices/${invoiceId}`)));
 }
 
 /** POST /v2/invoicing/invoices/{id}/cancel: the friend can no longer pay it. */

@@ -8,3 +8,4 @@ export * from './subscriptions.ts';
 export * from './invoicing.ts';
 export * from './requests.ts';
 export * from './webhooks.ts';
+export * from './vault.ts';

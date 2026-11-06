@@ -7,7 +7,7 @@
 
 import type { Page } from 'playwright-core';
 import type { Account, BusinessAccount } from './accounts.ts';
-import { login, parseBalance, withSandboxPage, type SandboxBalance } from './sandbox-balance.ts';
+import { login, parseBalance, parseLabeledBalance, withSandboxPage, type SandboxBalance } from './sandbox-balance.ts';
 
 const SANDBOX = 'https://www.sandbox.paypal.com';
 const NVP = process.env.PAYPAL_NVP_URL?.trim() || 'https://api-3t.sandbox.paypal.com/nvp';
@@ -37,7 +37,7 @@ export async function businessBalance(biz: BusinessAccount, opts: { force?: bool
   let pending = reading.get(biz.username);
   if (!pending) {
     pending = (api ? apiBalance(api) : browserBalance(biz))
-      .then((cents): SandboxBalance => ({ status: 'OK', cents, readAt: new Date().toISOString() }))
+      .then((cents): SandboxBalance => ({ status: 'OK', cents, unclaimed: false, readAt: new Date().toISOString() }))
       .catch((err): SandboxBalance => ({ status: 'ERROR', message: (err as Error).message.split('\n')[0]! }))
       .then((result) => {
         // Keep showing the last good balance if one read fails.
@@ -88,9 +88,20 @@ function browserBalance(biz: BusinessAccount): Promise<number> {
         await login(page, biz.sandboxEmail, password, () => page.waitForURL((url) => !/\/signin/.test(url.pathname), { timeout: 45_000 }));
         await page.goto(`${SANDBOX}${path}`, { waitUntil: 'domcontentloaded' });
       }
-      await page.waitForLoadState('networkidle').catch(() => undefined);
+      // PayPal's pages keep polling and never go network-idle (waiting for that took ~90 s), so read
+      // the page until the balance shows up (usually within a few seconds).
+      // Only an amount next to its balance label counts, so a half-drawn page never gives a wrong number.
+      const deadline = Date.now() + 20_000;
+      let text = '';
+      for (;;) {
+        text = await page.locator('body').innerText().catch(() => '');
+        const cents = parseLabeledBalance(text);
+        if (cents !== null) return cents;
+        if (Date.now() > deadline) break;
+        await page.waitForTimeout(750);
+      }
       try {
-        return parseBalance(await page.locator('body').innerText());
+        return parseBalance(text); // no label on this page: the old rule (first amount on the page)
       } catch (err) {
         lastError = err;
       }

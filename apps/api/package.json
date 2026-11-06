@@ -1,5 +1,5 @@
 {
-  "name": "@kubepay/api",
+  "name": "@paypalvault/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,14 +10,15 @@
     "start": "tsx src/index.ts",
     "setup:checkout": "tsx scripts/setup-checkout.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/**/*.test.ts",
+    "openapi": "tsx scripts/openapi.ts"
   },
   "dependencies": {
-    "@kubepay/agents": "*",
-    "@kubepay/audit": "*",
-    "@kubepay/db": "*",
-    "@kubepay/paypal": "*",
-    "@kubepay/policy": "*",
+    "@paypalvault/agents": "*",
+    "@paypalvault/audit": "*",
+    "@paypalvault/db": "*",
+    "@paypalvault/paypal": "*",
+    "@paypalvault/policy": "*",
     "cors": "2.8.6",
     "express": "5.3.0",
     "socket.io": "4.8.4",

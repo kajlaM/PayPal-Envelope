@@ -1,0 +1,5265 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PayPalVault API",
+    "version": "0.1.0",
+    "license": {
+      "name": "Proprietary (private)"
+    },
+    "description": "PRIVATE API of PayPalVault: policy-limited PayPal vaults for one AI shopping agent.\n\nSafety rules, built into the API:\n- Only the PayPalVault site and PayPalVault's own AI agent call it. No outside agents or tools; it is not public.\n- The agent can only ASK to buy (requestPurchase). The Policy Engine decides; the owner approves with a password when the rules say so.\n- Money only moves through PayPal (sandbox): funding via Orders, purchases via Checkout or Payouts, refunds via Payouts.\n- Internal operations need the internal key (x-internal-key), which only PayPalVault itself holds.\n- \"Verified by PayPal\" (verifyVault) only reads from PayPal."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:4000",
+      "description": "Private: the API is never exposed (the site forwards only what it needs)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Vaults",
+      "description": "Create, read, change and close vaults"
+    },
+    {
+      "name": "Funding",
+      "description": "Money into a vault, always from PayPal"
+    },
+    {
+      "name": "Purchases",
+      "description": "Every payment out goes through the Policy Engine"
+    },
+    {
+      "name": "Agent",
+      "description": "PayPalVault's own AI agent (no outside agents)"
+    },
+    {
+      "name": "Savings",
+      "description": "Vaults paid into over time"
+    },
+    {
+      "name": "PayPal verification",
+      "description": "Read-only check of every payment against PayPal's records"
+    },
+    {
+      "name": "Products",
+      "description": "Channel3 product data"
+    },
+    {
+      "name": "Audit",
+      "description": "Elastic audit log and Audit Copilot"
+    },
+    {
+      "name": "System",
+      "description": "Health, merchants, background jobs"
+    }
+  ],
+  "paths": {
+    "/api/vaults": {
+      "get": {
+        "operationId": "listVaults",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "All vaults with totals, Channel3 savings and their PayPal check summary",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VaultSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createVault",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "Create a vault from reviewed rules (it waits for its money)",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "policy": {
+                    "type": "object",
+                    "properties": {
+                      "vault_name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "vault_type": {
+                        "type": "string",
+                        "enum": [
+                          "SHOPPING",
+                          "UTILITY",
+                          "SAVINGS"
+                        ]
+                      },
+                      "allocated_budget": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10000
+                      },
+                      "currency": {
+                        "default": "USD",
+                        "type": "string",
+                        "const": "USD"
+                      },
+                      "rules": {
+                        "type": "object",
+                        "properties": {
+                          "max_single_transaction": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "allowed_categories": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "approved_merchants": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "expiry_timestamp": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "max_transactions_per_day": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "human_approval_above": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "on_policy_violation": {
+                            "default": "BLOCK_AND_ALERT",
+                            "type": "string",
+                            "enum": [
+                              "BLOCK",
+                              "BLOCK_AND_ALERT"
+                            ]
+                          },
+                          "control_mode": {
+                            "type": "string",
+                            "enum": [
+                              "ASK_ME",
+                              "ASK_ABOVE",
+                              "AUTOPILOT"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "max_single_transaction",
+                          "allowed_categories",
+                          "approved_merchants",
+                          "expiry_timestamp"
+                        ]
+                      },
+                      "liquidation": {
+                        "default": {
+                          "auto_refund": true
+                        },
+                        "type": "object",
+                        "properties": {
+                          "auto_refund": {
+                            "default": true,
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      "shopping": {
+                        "type": "object",
+                        "properties": {
+                          "product_query": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 200
+                          },
+                          "required_keywords": {
+                            "default": [],
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "preferred_keywords": {
+                            "default": [],
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "condition": {
+                            "default": "NEW",
+                            "type": "string",
+                            "enum": [
+                              "NEW",
+                              "ANY"
+                            ]
+                          },
+                          "min_rating": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 5
+                          },
+                          "max_delivery_days": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "weights": {
+                            "default": {
+                              "price": 5,
+                              "rating": 0,
+                              "delivery": 0,
+                              "model_match": 0
+                            },
+                            "type": "object",
+                            "properties": {
+                              "price": {
+                                "default": 5,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              },
+                              "rating": {
+                                "default": 0,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              },
+                              "delivery": {
+                                "default": 0,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              },
+                              "model_match": {
+                                "default": 0,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              }
+                            }
+                          },
+                          "check_every_minutes": {
+                            "default": 180,
+                            "type": "integer",
+                            "minimum": 15,
+                            "maximum": 1440
+                          },
+                          "list": {
+                            "type": "object",
+                            "properties": {
+                              "items": {
+                                "minItems": 2,
+                                "maxItems": 10,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 80
+                                    },
+                                    "product_query": {
+                                      "type": "string",
+                                      "minLength": 2,
+                                      "maxLength": 200
+                                    },
+                                    "max_price": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0
+                                    },
+                                    "required_keywords": {
+                                      "default": [],
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "preferred_keywords": {
+                                      "default": [],
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "condition": {
+                                      "type": "string",
+                                      "enum": [
+                                        "NEW",
+                                        "ANY"
+                                      ]
+                                    },
+                                    "min_rating": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 5
+                                    },
+                                    "max_delivery_days": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "name",
+                                    "product_query",
+                                    "max_price"
+                                  ]
+                                }
+                              },
+                              "rebalance": {
+                                "type": "string",
+                                "enum": [
+                                  "LEFTOVER",
+                                  "NONE"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "items"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "product_query"
+                        ]
+                      },
+                      "savings": {
+                        "type": "object",
+                        "properties": {
+                          "amount_per_payment": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "every": {
+                            "type": "string",
+                            "enum": [
+                              "DAY",
+                              "WEEK",
+                              "MONTH"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "amount_per_payment",
+                          "every"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "vault_name",
+                      "vault_type",
+                      "allocated_budget",
+                      "rules"
+                    ]
+                  },
+                  "sourceText": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "userId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "policy"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/details": {
+      "get": {
+        "operationId": "listVaultDetails",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "Every vault of one customer with full details",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VaultDetails"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}": {
+      "get": {
+        "operationId": "getVault",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "One vault with its ledger, decisions, rule history, proposals and savings plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/compile": {
+      "post": {
+        "operationId": "compilePolicy",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "Plain English to vault rules (preview only; nothing is saved)",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/policy": {
+      "post": {
+        "operationId": "changePolicy",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "Change an active vault's rules or amount (a new version; lower amount refunds the difference)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "policy": {
+                    "type": "object",
+                    "properties": {
+                      "vault_name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "vault_type": {
+                        "type": "string",
+                        "enum": [
+                          "SHOPPING",
+                          "UTILITY",
+                          "SAVINGS"
+                        ]
+                      },
+                      "allocated_budget": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10000
+                      },
+                      "currency": {
+                        "default": "USD",
+                        "type": "string",
+                        "const": "USD"
+                      },
+                      "rules": {
+                        "type": "object",
+                        "properties": {
+                          "max_single_transaction": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "allowed_categories": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "approved_merchants": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "expiry_timestamp": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "max_transactions_per_day": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "human_approval_above": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "on_policy_violation": {
+                            "default": "BLOCK_AND_ALERT",
+                            "type": "string",
+                            "enum": [
+                              "BLOCK",
+                              "BLOCK_AND_ALERT"
+                            ]
+                          },
+                          "control_mode": {
+                            "type": "string",
+                            "enum": [
+                              "ASK_ME",
+                              "ASK_ABOVE",
+                              "AUTOPILOT"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "max_single_transaction",
+                          "allowed_categories",
+                          "approved_merchants",
+                          "expiry_timestamp"
+                        ]
+                      },
+                      "liquidation": {
+                        "default": {
+                          "auto_refund": true
+                        },
+                        "type": "object",
+                        "properties": {
+                          "auto_refund": {
+                            "default": true,
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      "shopping": {
+                        "type": "object",
+                        "properties": {
+                          "product_query": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 200
+                          },
+                          "required_keywords": {
+                            "default": [],
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "preferred_keywords": {
+                            "default": [],
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "condition": {
+                            "default": "NEW",
+                            "type": "string",
+                            "enum": [
+                              "NEW",
+                              "ANY"
+                            ]
+                          },
+                          "min_rating": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 5
+                          },
+                          "max_delivery_days": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "weights": {
+                            "default": {
+                              "price": 5,
+                              "rating": 0,
+                              "delivery": 0,
+                              "model_match": 0
+                            },
+                            "type": "object",
+                            "properties": {
+                              "price": {
+                                "default": 5,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              },
+                              "rating": {
+                                "default": 0,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              },
+                              "delivery": {
+                                "default": 0,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              },
+                              "model_match": {
+                                "default": 0,
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 5
+                              }
+                            }
+                          },
+                          "check_every_minutes": {
+                            "default": 180,
+                            "type": "integer",
+                            "minimum": 15,
+                            "maximum": 1440
+                          },
+                          "list": {
+                            "type": "object",
+                            "properties": {
+                              "items": {
+                                "minItems": 2,
+                                "maxItems": 10,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 80
+                                    },
+                                    "product_query": {
+                                      "type": "string",
+                                      "minLength": 2,
+                                      "maxLength": 200
+                                    },
+                                    "max_price": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0
+                                    },
+                                    "required_keywords": {
+                                      "default": [],
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "preferred_keywords": {
+                                      "default": [],
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "condition": {
+                                      "type": "string",
+                                      "enum": [
+                                        "NEW",
+                                        "ANY"
+                                      ]
+                                    },
+                                    "min_rating": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 5
+                                    },
+                                    "max_delivery_days": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "name",
+                                    "product_query",
+                                    "max_price"
+                                  ]
+                                }
+                              },
+                              "rebalance": {
+                                "type": "string",
+                                "enum": [
+                                  "LEFTOVER",
+                                  "NONE"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "items"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "product_query"
+                        ]
+                      },
+                      "savings": {
+                        "type": "object",
+                        "properties": {
+                          "amount_per_payment": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "every": {
+                            "type": "string",
+                            "enum": [
+                              "DAY",
+                              "WEEK",
+                              "MONTH"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "amount_per_payment",
+                          "every"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "vault_name",
+                      "vault_type",
+                      "allocated_budget",
+                      "rules"
+                    ]
+                  },
+                  "sourceText": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "dryRun": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "policy"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/expiry": {
+      "post": {
+        "operationId": "changeExpiry",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "Move the vault's end date",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "expiresAt"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/liquidate": {
+      "post": {
+        "operationId": "liquidateVault",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "Close the vault and refund what is left to the owner's PayPal (Payouts)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/sync": {
+      "post": {
+        "operationId": "syncVault",
+        "tags": [
+          "Vaults"
+        ],
+        "summary": "Ask PayPal again about pending payments of this vault",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/fund/order": {
+      "post": {
+        "operationId": "createFundingOrder",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "PayPal order for the PayPal button (the owner approves it on PayPal)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/fund/capture": {
+      "post": {
+        "operationId": "captureFunding",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Capture the approved order: the vault gets its money",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "orderId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "orderId"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/fund/recorded": {
+      "post": {
+        "operationId": "recordFunding",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Record a payment the site took from the owner's saved PayPal",
+        "description": "Internal: needs the internal key (only PayPalVault's own site, agent and jobs have it).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "orderId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "orderId"
+                ]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "InternalKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/fund/requests": {
+      "post": {
+        "operationId": "createFundRequest",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Ask a friend: a PayPal money request whose payment funds the vault",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "payerEmail": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 254
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "requesterName": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "payerEmail"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/fund/requests/sync": {
+      "post": {
+        "operationId": "syncFundRequests",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Ask PayPal whether the friend paid",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/fund/requests/{requestId}/cancel": {
+      "post": {
+        "operationId": "cancelFundRequest",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Cancel an open money request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fund-requests": {
+      "get": {
+        "operationId": "listFundRequests",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Money requests sent to one PayPal email",
+        "parameters": [
+          {
+            "name": "payerEmail",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OPEN",
+                "PAID",
+                "CANCELLED"
+              ]
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fund-requests/{id}/sync": {
+      "post": {
+        "operationId": "syncFundRequest",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Ask PayPal about one money request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/subscribe": {
+      "post": {
+        "operationId": "createSubscription",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Utility vault: monthly PayPal subscription that tops it up",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/subscribe/confirm": {
+      "post": {
+        "operationId": "confirmSubscription",
+        "tags": [
+          "Funding"
+        ],
+        "summary": "Confirm the approved subscription",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscriptionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "subscriptionId"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/spend": {
+      "post": {
+        "operationId": "requestPurchase",
+        "tags": [
+          "Purchases"
+        ],
+        "summary": "The agent ASKS to buy: the Policy Engine approves, blocks, or asks the owner",
+        "description": "The only way money leaves a vault for a shop. The Policy Engine checks the vault rules (budget, shops, categories, limits, live price) first. 200 = approved and paid with PayPal; 202 = waits for the owner's approval; 403 = blocked. Internal: needs the internal key (only PayPalVault's own site, agent and jobs have it).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "merchant": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "amount": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "category": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "product_url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "verified_price": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "invoice_id": {
+                    "type": "string"
+                  },
+                  "item_id": {
+                    "type": "string"
+                  },
+                  "channel3": {
+                    "type": "object",
+                    "properties": {
+                      "product_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "maxLength": 100
+                      },
+                      "image": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "uri"
+                      },
+                      "brand": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "maxLength": 100
+                      },
+                      "stores": {
+                        "maxItems": 10,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "merchant": {
+                              "type": "string",
+                              "maxLength": 100
+                            },
+                            "price": {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            "was": {
+                              "type": [
+                                "number",
+                                "null"
+                              ],
+                              "minimum": 0
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri"
+                            }
+                          },
+                          "required": [
+                            "merchant",
+                            "price"
+                          ]
+                        }
+                      },
+                      "saved": {
+                        "type": [
+                          "number",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "history": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "typical",
+                              "high"
+                            ]
+                          },
+                          "mean": {
+                            "type": "number"
+                          },
+                          "min": {
+                            "type": "number"
+                          },
+                          "max": {
+                            "type": "number"
+                          },
+                          "days": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "points": {
+                            "maxItems": 120,
+                            "type": "array",
+                            "items": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": {
+                                "type": [
+                                  "string",
+                                  "number"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "status",
+                          "mean",
+                          "min",
+                          "max",
+                          "days"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "merchant",
+                  "amount",
+                  "category",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "InternalKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved and paid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Needs the owner's approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Blocked by the rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpendResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/decisions/{decisionId}/approve": {
+      "post": {
+        "operationId": "approvePurchase",
+        "tags": [
+          "Purchases"
+        ],
+        "summary": "The owner approves a waiting purchase (the hard rules are checked again first)",
+        "description": "The site asks for the owner's password before calling this.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          },
+          {
+            "name": "decisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/decisions/{decisionId}/reject": {
+      "post": {
+        "operationId": "rejectPurchase",
+        "tags": [
+          "Purchases"
+        ],
+        "summary": "The owner rejects a waiting purchase",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          },
+          {
+            "name": "decisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/proposals": {
+      "post": {
+        "operationId": "proposeOptions",
+        "tags": [
+          "Purchases"
+        ],
+        "summary": "The agent suggests up to 3 options; nothing is bought until the owner picks one",
+        "description": "Internal: needs the internal key (only PayPalVault's own site, agent and jobs have it).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "item_id": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "options": {
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "merchant": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "price": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "verified_price": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "exclusiveMinimum": 0
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "category": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "rating": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "delivery_days": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "condition": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "channel3": {
+                          "type": "object",
+                          "properties": {
+                            "product_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 100
+                            },
+                            "image": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "format": "uri"
+                            },
+                            "brand": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 100
+                            },
+                            "stores": {
+                              "maxItems": 10,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "merchant": {
+                                    "type": "string",
+                                    "maxLength": 100
+                                  },
+                                  "price": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  },
+                                  "was": {
+                                    "type": [
+                                      "number",
+                                      "null"
+                                    ],
+                                    "minimum": 0
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "merchant",
+                                  "price"
+                                ]
+                              }
+                            },
+                            "saved": {
+                              "type": [
+                                "number",
+                                "null"
+                              ],
+                              "minimum": 0
+                            },
+                            "history": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "low",
+                                    "typical",
+                                    "high"
+                                  ]
+                                },
+                                "mean": {
+                                  "type": "number"
+                                },
+                                "min": {
+                                  "type": "number"
+                                },
+                                "max": {
+                                  "type": "number"
+                                },
+                                "days": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                "points": {
+                                  "maxItems": 120,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "items": {
+                                      "type": [
+                                        "string",
+                                        "number"
+                                      ]
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "mean",
+                                "min",
+                                "max",
+                                "days"
+                              ]
+                            }
+                          }
+                        },
+                        "pros": {
+                          "maxItems": 5,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "maxLength": 200
+                          }
+                        },
+                        "cons": {
+                          "maxItems": 5,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "maxLength": 200
+                          }
+                        }
+                      },
+                      "required": [
+                        "title",
+                        "merchant",
+                        "price",
+                        "verified_price",
+                        "url",
+                        "category",
+                        "pros",
+                        "cons"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "options"
+                ]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "InternalKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/proposals/{proposalId}/choose": {
+      "post": {
+        "operationId": "chooseOption",
+        "tags": [
+          "Purchases"
+        ],
+        "summary": "The owner picks an option (it then goes through the Policy Engine)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          },
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2
+                  }
+                },
+                "required": [
+                  "index"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/proposals/{proposalId}/reject": {
+      "post": {
+        "operationId": "rejectOptions",
+        "tags": [
+          "Purchases"
+        ],
+        "summary": "The owner wants none of the options",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          },
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/agent": {
+      "post": {
+        "operationId": "runAgent",
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Run the vault's own AI agent now (it can only ask to buy, via requestPurchase)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "task": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "202": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/agent/stop": {
+      "post": {
+        "operationId": "stopAgent",
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Stop watching this vault",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/agent/next": {
+      "post": {
+        "operationId": "scheduleAgent",
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Move the agent's next check",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "at"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/savings/charge": {
+      "post": {
+        "operationId": "chargeSavingsNow",
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Take the next savings payment now (from the owner's saved PayPal)",
+        "description": "Internal: needs the internal key (only PayPalVault's own site, agent and jobs have it).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [
+          {
+            "InternalKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/savings/next": {
+      "post": {
+        "operationId": "moveSavingsPayment",
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Move the next savings payment (the later ones follow)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "at"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/savings/pause": {
+      "post": {
+        "operationId": "pauseSavings",
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Pause the savings plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/savings/resume": {
+      "post": {
+        "operationId": "resumeSavings",
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Resume the savings plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vaults/{id}/verify": {
+      "post": {
+        "operationId": "verifyVault",
+        "tags": [
+          "PayPal verification"
+        ],
+        "summary": "Check every payment of this vault against PayPal's own records",
+        "description": "Read-only: PayPal is only asked, never paid, and the ledger's amounts and statuses are never changed. Also runs every night.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Vault id"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultVerification"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products/lookup": {
+      "post": {
+        "operationId": "lookupProduct",
+        "tags": [
+          "Products"
+        ],
+        "summary": "A store's product link to the product, its stores and its 90-day price (Channel3)",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/audit/search": {
+      "get": {
+        "operationId": "searchAudit",
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Search the audit log (keyword + meaning)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 300
+            }
+          },
+          {
+            "name": "vaultId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/audit/ask": {
+      "post": {
+        "operationId": "askAudit",
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Audit Copilot: a question in plain English, answered from cited audit records",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "vaultId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "question"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/audit/reindex": {
+      "post": {
+        "operationId": "reindexAudit",
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Rewrite every decision and payment into the audit log",
+        "description": "Internal: needs the internal key (only PayPalVault's own site, agent and jobs have it).",
+        "parameters": [],
+        "security": [
+          {
+            "InternalKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "tags": [
+          "System"
+        ],
+        "summary": "Is the API up?",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/merchants": {
+      "get": {
+        "operationId": "listMerchants",
+        "tags": [
+          "System"
+        ],
+        "summary": "Shops vaults may pay",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ledger": {
+      "get": {
+        "operationId": "listLedger",
+        "tags": [
+          "System"
+        ],
+        "summary": "Latest ledger entries (optionally of one vault)",
+        "parameters": [
+          {
+            "name": "vaultId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LedgerEntry"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/decisions": {
+      "get": {
+        "operationId": "listDecisions",
+        "tags": [
+          "System"
+        ],
+        "summary": "Latest Policy Engine decisions (optionally of one vault)",
+        "parameters": [
+          {
+            "name": "vaultId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Decision"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/tick": {
+      "post": {
+        "operationId": "runBackgroundJobs",
+        "tags": [
+          "System"
+        ],
+        "summary": "Run the background jobs once (sweeper, savings, watch mode, nightly PayPal check)",
+        "description": "Internal: needs the internal key (only PayPalVault's own site, agent and jobs have it).",
+        "parameters": [],
+        "security": [
+          {
+            "InternalKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error: { error: CODE, message? }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "InternalKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-internal-key",
+        "description": "Only PayPalVault's own site, agent and background jobs have it. Never given to outside agents or tools."
+      }
+    },
+    "schemas": {
+      "Object": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "PayPalCheck": {
+        "type": "string",
+        "enum": [
+          "VERIFIED",
+          "WAITING",
+          "MISMATCH",
+          "UNCHECKED"
+        ],
+        "description": "Last read-only check against PayPal's records"
+      },
+      "LedgerEntry": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "vaultId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "FUND",
+              "SPEND",
+              "LIQUIDATE"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "amountCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "paypalRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paidVia": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paypalCheck": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayPalCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paypalCheckedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "paypalTxnId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paypalCheckNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Decision": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "vaultId": {
+            "type": "string"
+          },
+          "requestJson": {
+            "type": "object",
+            "properties": {
+              "merchant": {
+                "type": "string",
+                "minLength": 1
+              },
+              "amount": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "category": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "product_url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "verified_price": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "invoice_id": {
+                "type": "string"
+              },
+              "item_id": {
+                "type": "string"
+              },
+              "channel3": {
+                "type": "object",
+                "properties": {
+                  "product_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100
+                  },
+                  "image": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri"
+                  },
+                  "brand": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100
+                  },
+                  "stores": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "merchant": {
+                          "type": "string",
+                          "maxLength": 100
+                        },
+                        "price": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "was": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "minimum": 0
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "merchant",
+                        "price"
+                      ]
+                    }
+                  },
+                  "saved": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "history": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "typical",
+                          "high"
+                        ]
+                      },
+                      "mean": {
+                        "type": "number"
+                      },
+                      "min": {
+                        "type": "number"
+                      },
+                      "max": {
+                        "type": "number"
+                      },
+                      "days": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "points": {
+                        "maxItems": 120,
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": {
+                            "type": [
+                              "string",
+                              "number"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "mean",
+                      "min",
+                      "max",
+                      "days"
+                    ]
+                  }
+                }
+              }
+            },
+            "required": [
+              "merchant",
+              "amount",
+              "category",
+              "reason"
+            ]
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "APPROVE",
+              "BLOCK",
+              "NEEDS_HUMAN"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resolvedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VaultSummary": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SHOPPING",
+              "UTILITY",
+              "SAVINGS"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING_FUNDING",
+              "SAVING",
+              "ACTIVE",
+              "EXPIRED",
+              "LIQUIDATED"
+            ]
+          },
+          "budgetCents": {
+            "type": "integer"
+          },
+          "balanceCents": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "vault_name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "vault_type": {
+                "type": "string",
+                "enum": [
+                  "SHOPPING",
+                  "UTILITY",
+                  "SAVINGS"
+                ]
+              },
+              "allocated_budget": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 10000
+              },
+              "currency": {
+                "default": "USD",
+                "type": "string",
+                "const": "USD"
+              },
+              "rules": {
+                "type": "object",
+                "properties": {
+                  "max_single_transaction": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "allowed_categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "approved_merchants": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expiry_timestamp": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "max_transactions_per_day": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "human_approval_above": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "on_policy_violation": {
+                    "default": "BLOCK_AND_ALERT",
+                    "type": "string",
+                    "enum": [
+                      "BLOCK",
+                      "BLOCK_AND_ALERT"
+                    ]
+                  },
+                  "control_mode": {
+                    "type": "string",
+                    "enum": [
+                      "ASK_ME",
+                      "ASK_ABOVE",
+                      "AUTOPILOT"
+                    ]
+                  }
+                },
+                "required": [
+                  "max_single_transaction",
+                  "allowed_categories",
+                  "approved_merchants",
+                  "expiry_timestamp"
+                ]
+              },
+              "liquidation": {
+                "default": {
+                  "auto_refund": true
+                },
+                "type": "object",
+                "properties": {
+                  "auto_refund": {
+                    "default": true,
+                    "type": "boolean"
+                  }
+                }
+              },
+              "shopping": {
+                "type": "object",
+                "properties": {
+                  "product_query": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "required_keywords": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "preferred_keywords": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "condition": {
+                    "default": "NEW",
+                    "type": "string",
+                    "enum": [
+                      "NEW",
+                      "ANY"
+                    ]
+                  },
+                  "min_rating": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 5
+                  },
+                  "max_delivery_days": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "weights": {
+                    "default": {
+                      "price": 5,
+                      "rating": 0,
+                      "delivery": 0,
+                      "model_match": 0
+                    },
+                    "type": "object",
+                    "properties": {
+                      "price": {
+                        "default": 5,
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 5
+                      },
+                      "rating": {
+                        "default": 0,
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 5
+                      },
+                      "delivery": {
+                        "default": 0,
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 5
+                      },
+                      "model_match": {
+                        "default": 0,
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 5
+                      }
+                    }
+                  },
+                  "check_every_minutes": {
+                    "default": 180,
+                    "type": "integer",
+                    "minimum": 15,
+                    "maximum": 1440
+                  },
+                  "list": {
+                    "type": "object",
+                    "properties": {
+                      "items": {
+                        "minItems": 2,
+                        "maxItems": 10,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "product_query": {
+                              "type": "string",
+                              "minLength": 2,
+                              "maxLength": 200
+                            },
+                            "max_price": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "required_keywords": {
+                              "default": [],
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "preferred_keywords": {
+                              "default": [],
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "condition": {
+                              "type": "string",
+                              "enum": [
+                                "NEW",
+                                "ANY"
+                              ]
+                            },
+                            "min_rating": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 5
+                            },
+                            "max_delivery_days": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "product_query",
+                            "max_price"
+                          ]
+                        }
+                      },
+                      "rebalance": {
+                        "type": "string",
+                        "enum": [
+                          "LEFTOVER",
+                          "NONE"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "items"
+                    ]
+                  }
+                },
+                "required": [
+                  "product_query"
+                ]
+              },
+              "savings": {
+                "type": "object",
+                "properties": {
+                  "amount_per_payment": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "every": {
+                    "type": "string",
+                    "enum": [
+                      "DAY",
+                      "WEEK",
+                      "MONTH"
+                    ]
+                  }
+                },
+                "required": [
+                  "amount_per_payment",
+                  "every"
+                ]
+              }
+            },
+            "required": [
+              "vault_name",
+              "vault_type",
+              "allocated_budget",
+              "rules"
+            ]
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "paidInCents": {
+                "type": "integer"
+              },
+              "spentCents": {
+                "type": "integer"
+              },
+              "refundedCents": {
+                "type": "integer"
+              }
+            }
+          },
+          "channel3": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "storesCents": {
+                "type": "integer"
+              },
+              "averageCents": {
+                "type": "integer"
+              },
+              "purchases": {
+                "type": "integer"
+              }
+            }
+          },
+          "verification": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "verified": {
+                "type": "integer"
+              },
+              "waiting": {
+                "type": "integer"
+              },
+              "mismatch": {
+                "type": "integer"
+              },
+              "unchecked": {
+                "type": "integer"
+              },
+              "notYet": {
+                "type": "integer"
+              },
+              "checkedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "VaultDetails": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VaultSummary"
+          },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "ledger": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LedgerEntry"
+                }
+              },
+              "decisions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Decision"
+                }
+              },
+              "policyHistory": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "proposals": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "fundRequests": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "savings": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        ]
+      },
+      "SpendResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "ledgerEntry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LedgerEntry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "VaultVerification": {
+        "type": "object",
+        "properties": {
+          "vaultId": {
+            "type": "string"
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "VERIFIED": {
+                "type": "integer"
+              },
+              "WAITING": {
+                "type": "integer"
+              },
+              "MISMATCH": {
+                "type": "integer"
+              },
+              "UNCHECKED": {
+                "type": "integer"
+              }
+            }
+          },
+          "balanceMatches": {
+            "type": "boolean"
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "mismatches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entryId": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

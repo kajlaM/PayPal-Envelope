@@ -1,6 +1,6 @@
-import { prisma } from '@kubepay/db';
-import { anomalyScore, auditEnabled, ensureAuditIndex, indexDecision, indexLedger } from '@kubepay/audit';
-import { SpendRequestSchema, type SpendRequest } from '@kubepay/policy';
+import { prisma } from '@paypalvault/db';
+import { anomalyScore, auditEnabled, ensureAuditIndex, indexDecision, indexLedger } from '@paypalvault/audit';
+import { SpendRequestSchema, type SpendRequest } from '@paypalvault/policy';
 import { onEvent } from '../events.ts';
 
 // Elastic audit log (Step 11). Every decision and ledger change that the API emits is written to

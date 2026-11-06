@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "portal": {
+    "site": {
+      "name": "PayPalVault API (private)",
+      "description": "Private API of PayPalVault. Only the PayPalVault site and its own AI agent call it; it is never published."
+    },
+    "brand": {
+      "colors": { "primary": "#0070BA" }
+    },
+    "ai": { "pageActions": false }
+  },
+  "languages": {
+    "typescript": {}
+  }
+}

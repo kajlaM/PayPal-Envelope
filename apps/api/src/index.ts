@@ -3,12 +3,13 @@ import { createServer } from 'node:http';
 import cors from 'cors';
 import express from 'express';
 import { Server } from 'socket.io';
-import { prisma } from '@kubepay/db';
+import { prisma } from '@paypalvault/db';
 import { setSocketServer } from './events.ts';
 import { errorHandler, requireInternalKey } from './http.ts';
 import { auditRouter } from './routes/audit.ts';
 import { demoStoreRouter } from './routes/demo-store.ts';
 import { fundRequestsRouter } from './routes/fund-requests.ts';
+import { productsRouter } from './routes/products.ts';
 import { vaultsRouter } from './routes/vaults.ts';
 import { startAuditLog } from './services/audit.ts';
 import { startNotifications } from './services/notify.ts';
@@ -27,6 +28,7 @@ app.use('/api/vaults', vaultsRouter);
 app.use('/api/fund-requests', fundRequestsRouter);
 app.use('/demo-store', demoStoreRouter);
 app.use('/api/audit', auditRouter);
+app.use('/api/products', productsRouter);
 // One background tick (sweeper + agent watch) for a cron job; the server also runs it every minute.
 app.post('/api/jobs/tick', requireInternalKey, async (_req, res) => {
   res.json(await tick());
@@ -49,7 +51,7 @@ setSocketServer(new Server(server, { cors: { origin: '*' } }));
 
 const port = Number(process.env.PORT ?? 4000);
 server.listen(port, () => {
-  console.log(`KubePay API on http://localhost:${port}`);
+  console.log(`PayPalVault API on http://localhost:${port}`);
   startBackgroundJobs();
   startNotifications();
   startAuditLog().catch((err) => console.error('Audit log failed to start:', (err as Error).message));

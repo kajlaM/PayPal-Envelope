@@ -7,7 +7,7 @@ export const REASON_TEXT: Record<string, string> = {
   MAX_LIMIT_EXCEEDED: 'the amount was above the per-purchase limit',
   INSUFFICIENT_VAULT_BALANCE: 'the vault did not have enough money left',
   MERCHANT_NOT_APPROVED: 'the merchant is not on the approved list',
-  MERCHANT_NOT_REGISTERED: 'the merchant is not registered with KubePay',
+  MERCHANT_NOT_REGISTERED: 'the merchant is not registered with PayPalVault',
   CATEGORY_NOT_ALLOWED: 'the product category is not allowed in this vault',
   DAILY_LIMIT_REACHED: 'the daily number of purchases was reached',
   PRICE_MISMATCH: 'the live price on the shop page was different from the price asked (possible overcharge)',

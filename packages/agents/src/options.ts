@@ -1,4 +1,4 @@
-import type { ProposalOption } from '@kubepay/policy';
+import type { ProposalOption } from '@paypalvault/policy';
 import type { Candidate } from './rank.ts';
 
 // Ask me vaults: the facts behind each of the agent's top options, as pros and cons. Deterministic

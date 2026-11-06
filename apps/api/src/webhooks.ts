@@ -1,6 +1,6 @@
 import express, { Router, type Request, type Response } from 'express';
-import { addFunding, failFunding, prisma } from '@kubepay/db';
-import { getSubscription, valueToCents, verifyWebhook, type WebhookApp } from '@kubepay/paypal';
+import { addFunding, failFunding, prisma } from '@paypalvault/db';
+import { getSubscription, valueToCents, verifyWebhook, type WebhookApp } from '@paypalvault/paypal';
 import { emit } from './events.ts';
 import { HttpError } from './http.ts';
 import { settleCapture } from './services/checkout.ts';
@@ -68,7 +68,7 @@ async function handleEvent(event: PayPalEvent): Promise<{ action: string; vaultI
   if (type === 'CHECKOUT.ORDER.APPROVED' || type === 'PAYMENT.CAPTURE.COMPLETED') {
     // APPROVED: the user approved in PayPal; we capture it now (no need to wait for the browser).
     const orderId = type === 'CHECKOUT.ORDER.APPROVED' ? r.id : r.supplementary_data?.related_ids?.order_id;
-    if (!(await isOurFundingOrder(orderId))) return { action: 'ignored: not a KubePay funding order' };
+    if (!(await isOurFundingOrder(orderId))) return { action: 'ignored: not a PayPalVault funding order' };
     const { vault } = await finishFunding(orderId, { capture: type === 'CHECKOUT.ORDER.APPROVED' });
     return { action: 'vault funded', vaultId: vault.id };
   }
@@ -105,7 +105,7 @@ async function handleEvent(event: PayPalEvent): Promise<{ action: string; vaultI
   // ---- Subscriptions (utility vault monthly top-up) ----
   if (type === 'BILLING.SUBSCRIPTION.ACTIVATED') {
     const vaultId = await linkSubscription(r.id);
-    return { action: vaultId ? 'subscription linked' : 'ignored: not a KubePay subscription', vaultId: vaultId ?? undefined };
+    return { action: vaultId ? 'subscription linked' : 'ignored: not a PayPalVault subscription', vaultId: vaultId ?? undefined };
   }
   if (type === 'BILLING.SUBSCRIPTION.CANCELLED') {
     const vault = await prisma.vault.findUnique({ where: { paypalSubscriptionId: r.id } });

@@ -1,5 +1,5 @@
 // Seller side of agentic commerce: what a shop sees of the AI agents that buy from it.
-// Read-only views over data KubePay already keeps (ledger, decisions, proposals, policies):
+// Read-only views over data PayPalVault already keeps (ledger, decisions, proposals, policies):
 //   orders()  - every purchase an agent made from this business, with why the agent was allowed to buy
 //   missed()  - every time an agent wanted to buy here but did not, and why (the sale the shop lost)
 //   ask()     - plain English -> AG Grid filters / sort / grouping (our AI; AG Grid's AI Toolkit is Enterprise)
@@ -9,9 +9,9 @@
 import { createHmac } from 'node:crypto';
 import { generateObject } from 'ai';
 import { z } from 'zod';
-import { prisma } from '@kubepay/db';
-import { policyModels } from '@kubepay/policy';
-import { c3, priceHistory, priceVerdict } from '@kubepay/agents';
+import { prisma } from '@paypalvault/db';
+import { policyModels } from '@paypalvault/policy';
+import { c3, priceHistory, priceVerdict } from '@paypalvault/agents';
 import type { BusinessAccount } from './accounts.ts';
 
 const SECRET = process.env.INTERNAL_API_KEY?.trim() ?? '';
@@ -126,7 +126,10 @@ export async function orders(biz: BusinessAccount) {
       status: STATUS[e.status] ?? e.status,
       customer: customerLabel(biz, e.vault.userId),
       approval: resolved === 'CHOSEN_BY_OWNER' ? 'Picked by customer' : resolved === 'APPROVED_BY_HUMAN' ? 'Approved by customer' : 'Autopilot',
-      paypalRef: e.paypalRef ?? '',
+      paypalRef: e.paypalTxnId ?? e.paypalRef ?? '',
+      // "Verified by PayPal": the last read-only check of this payment against PayPal's own records.
+      paypal: e.paypalCheck === 'VERIFIED' ? 'Confirmed' : e.paypalCheck === 'MISMATCH' ? 'Differs' : e.paypalCheck === 'WAITING' ? 'Processing' : 'Not checked',
+      paypalNote: e.paypalCheck === 'VERIFIED' ? 'Confirmed in your PayPal account' : e.paypalCheckNote ?? 'Not checked against PayPal yet',
       why: { checks, price, approval },
     };
   });

@@ -1,4 +1,6 @@
-import { REASON_TEXT } from '@kubepay/audit';
+import { REASON_TEXT } from '@paypalvault/audit';
+import { historyText, storesText } from '@paypalvault/agents';
+import type { Channel3Insight } from '@paypalvault/policy';
 
 // Alert emails (Step 12). Builds each email from the vault's own facts: the subject starts with the
 // vault name and short id, so every vault's mail is easy to tell apart in the inbox. Pure functions
@@ -15,6 +17,7 @@ export type EmailKind =
   | 'LIQUIDATED'
   | 'ENDING_SOON'
   | 'PAYOUT_FAILED'
+  | 'PAYPAL_MISMATCH'
   | 'SAVINGS_PAYMENT'
   | 'SAVINGS_GOAL_REACHED'
   | 'SAVINGS_PAYMENT_FAILED';
@@ -33,7 +36,8 @@ export type VaultFacts = {
   link: string; // opens this vault on the site
 };
 
-export type Purchase = { item: string; merchant: string; amountCents: number; productUrl?: string };
+// `channel3`: the product data behind the pick (photo, stores compared, 90-day price), when it came from Channel3.
+export type Purchase = { item: string; merchant: string; amountCents: number; productUrl?: string; channel3?: Channel3Insight };
 
 /** A button that answers the email (Approve / Reject / Pick). The link opens a confirm page on the site. */
 export type EmailAction = { label: string; url: string; style: 'primary' | 'secondary' };
@@ -64,6 +68,7 @@ export type EmailInput =
     }
   | { kind: 'ENDING_SOON'; vault: VaultFacts }
   | { kind: 'PAYOUT_FAILED'; vault: VaultFacts; amountCents: number; to: string; refund: boolean; reason?: string }
+  | { kind: 'PAYPAL_MISMATCH'; vault: VaultFacts; payment: string; amountCents: number; paypalSays: string; paypalRef?: string }
   | { kind: 'SAVINGS_PAYMENT'; vault: VaultFacts; amountCents: number; paymentNumber: number; paymentsTotal: number; nextAt?: Date }
   | { kind: 'SAVINGS_GOAL_REACHED'; vault: VaultFacts; willShop: boolean }
   | { kind: 'SAVINGS_PAYMENT_FAILED'; vault: VaultFacts; reason: string; failures: number; paused: boolean };
@@ -84,7 +89,7 @@ const FIX: Record<string, string> = {
   CATEGORY_NOT_ALLOWED: 'Change the vault rules to allow this kind of product.',
   INSUFFICIENT_VAULT_BALANCE: 'Raise the vault amount to add money.',
   DAILY_LIMIT_REACHED: 'The agent tries again tomorrow.',
-  PRICE_MISMATCH: 'Nothing to do: KubePay stopped a possible overcharge.',
+  PRICE_MISMATCH: 'Nothing to do: PayPalVault stopped a possible overcharge.',
 };
 
 type Body = {
@@ -95,7 +100,22 @@ type Body = {
   button?: string;
   actions?: EmailAction[]; // answer from the email; the vault link then becomes a small text link
   tone?: 'good' | 'warn' | 'bad';
+  image?: string; // product photo (Channel3)
 };
+
+/** What Channel3 says about the product, as email rows: price check, other stores, money saved. */
+function channel3Facts(p: Purchase): [string, string][] {
+  const c3 = p.channel3;
+  if (!c3) return [];
+  const price = p.amountCents / 100;
+  const check = historyText(price, c3.history ?? null);
+  const others = (c3.stores ?? []).filter((st) => !(st.merchant === p.merchant && Math.abs(st.price - price) < 0.01));
+  return [
+    ...(check ? [['Price check', `${check} · Channel3`] as [string, string]] : []),
+    ...(others.length ? [['Other stores', storesText(others)] as [string, string]] : []),
+    ...(c3.saved ? [['You save', `${usd(Math.round(c3.saved * 100))} vs the most expensive store`] as [string, string]] : []),
+  ];
+}
 
 /** Builds one alert email. */
 export function buildEmail(input: EmailInput): Email {
@@ -130,8 +150,9 @@ export function buildEmail(input: EmailInput): Email {
       b = {
         headline: v.type === 'UTILITY' ? 'Bill paid' : 'Purchase made',
         intro: v.type === 'UTILITY' ? `Your vault paid ${p.merchant}.` : `Your AI agent bought something that matches your rules.`,
-        facts: [['Item', p.item], ['Shop', p.merchant], ['Price', usd(p.amountCents)], ...(p.productUrl ? [['Product page', p.productUrl] as [string, string]] : []), left],
+        facts: [['Item', p.item], ['Shop', p.merchant], ['Price', usd(p.amountCents)], ...channel3Facts(p), ...(p.productUrl ? [['Product page', p.productUrl] as [string, string]] : []), left],
         tone: 'good',
+        image: p.channel3?.image ?? undefined,
       };
       break;
     }
@@ -142,7 +163,8 @@ export function buildEmail(input: EmailInput): Email {
       b = {
         headline: 'Your approval is needed',
         intro: `The agent wants to buy this, but your rules ask you first because ${reasonText(input.reasons)}.`,
-        facts: [['Item', p.item], ['Shop', p.merchant], ['Price', usd(p.amountCents)], ...(p.productUrl ? [['Product page', p.productUrl] as [string, string]] : []), left],
+        facts: [['Item', p.item], ['Shop', p.merchant], ['Price', usd(p.amountCents)], ...channel3Facts(p), ...(p.productUrl ? [['Product page', p.productUrl] as [string, string]] : []), left],
+        image: p.channel3?.image ?? undefined,
         outro: input.actions?.length
           ? 'Answer right here: Approve asks for your password on the next page; Reject needs none. These buttons work once and expire in 24 hours.'
           : 'Nothing is paid until you approve it with your password.',
@@ -159,7 +181,10 @@ export function buildEmail(input: EmailInput): Email {
       b = {
         headline: 'Your options are ready',
         intro: `${input.summary ? `${input.summary} ` : ''}This vault is set to "Ask me", so nothing is bought until you pick one.`,
-        facts: [...input.options.map((o, i) => [`Option ${i + 1}`, `${o.item} · ${usd(o.amountCents)} at ${o.merchant}`] as [string, string]), left],
+        facts: [...input.options.map((o, i) => {
+          const check = o.channel3 ? historyText(o.amountCents / 100, o.channel3.history ?? null) : null;
+          return [`Option ${i + 1}`, `${o.item} · ${usd(o.amountCents)} at ${o.merchant}${check ? ` · ${check}` : ''}`] as [string, string];
+        }), left],
         outro: input.actions?.length
           ? 'Pick one right here (your password is asked on the next page), or open the vault to see the pros and cons first. These buttons work once and expire in 24 hours.'
           : 'Open the vault to see the pros and cons of each, then tap the one you want.',
@@ -176,7 +201,7 @@ export function buildEmail(input: EmailInput): Email {
       s = subject(`Blocked: ${p.item} for ${usd(p.amountCents)} at ${p.merchant}`);
       b = {
         headline: 'A purchase was blocked',
-        intro: `KubePay stopped this payment because ${reasonText(input.reasons)}. No money moved.`,
+        intro: `PayPalVault stopped this payment because ${reasonText(input.reasons)}. No money moved.`,
         facts: [['Item', p.item], ['Shop', p.merchant], ['Price', usd(p.amountCents)], left],
         outro: fix ?? 'The agent keeps looking for something that fits your rules.',
         tone: 'bad',
@@ -275,7 +300,7 @@ export function buildEmail(input: EmailInput): Email {
       s = subject(input.paused ? '⚠️ Savings plan paused: payment failed' : '⚠️ Savings payment failed: retrying tomorrow');
       b = {
         headline: input.paused ? 'Your savings plan is paused' : 'A savings payment failed',
-        intro: `KubePay could not take this payment from your PayPal: ${input.reason} ${input.paused ? 'No more payments are taken until you resume the plan.' : 'It is tried again tomorrow.'}`,
+        intro: `PayPalVault could not take this payment from your PayPal: ${input.reason} ${input.paused ? 'No more payments are taken until you resume the plan.' : 'It is tried again tomorrow.'}`,
         facts: [['Saved so far', `${usd(v.balanceCents)} of ${usd(v.budgetCents)}`], ['Failed tries in a row', String(input.failures)]],
         outro: 'The money already saved is safe in the vault.',
         button: input.paused ? 'Open the vault to resume' : undefined,
@@ -289,7 +314,25 @@ export function buildEmail(input: EmailInput): Email {
         headline: input.refund ? 'A refund failed' : 'A payment failed',
         intro: `PayPal did not complete ${input.refund ? 'the refund to your PayPal' : `the payment to ${input.to}`}. The money is safe: it is back in the vault.`,
         facts: [['Amount', usd(input.amountCents)], ...(input.reason ? [['PayPal said', input.reason] as [string, string]] : []), left],
-        outro: input.refund ? 'KubePay tries the refund again automatically.' : 'The agent can try again; open the vault to see what happened.',
+        outro: input.refund ? 'PayPalVault tries the refund again automatically.' : 'The agent can try again; open the vault to see what happened.',
+        tone: 'bad',
+      };
+      break;
+
+    case 'PAYPAL_MISMATCH':
+      s = subject(`⚠️ PayPal shows something different for ${input.payment}`);
+      b = {
+        headline: 'Please check this payment',
+        intro: 'PayPalVault checks every vault payment against PayPal\'s own records. For this one, PayPal says something different from the vault.',
+        facts: [
+          ['Payment', input.payment],
+          ['Amount', usd(input.amountCents)],
+          ['PayPal says', input.paypalSays],
+          ...(input.paypalRef ? [['PayPal reference', input.paypalRef] as [string, string]] : []),
+          left,
+        ],
+        outro: 'Nothing was changed automatically. You can look the payment up in your PayPal account with the reference above.',
+        button: 'Open the vault',
         tone: 'bad',
       };
       break;
@@ -313,7 +356,7 @@ function renderText(v: VaultFacts, b: Body) {
     `${b.actions?.length ? 'Open the vault' : b.button ?? 'Open the vault'}: ${v.link}`,
     '',
     `Vault "${v.name}" · #${shortId(v.id)}`,
-    'KubePay',
+    'PayPalVault',
   ].join('\n');
 }
 
@@ -338,12 +381,13 @@ function renderHtml(v: VaultFacts, b: Body) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F5F7FA;padding:24px 12px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border-radius:12px;overflow:hidden">
 <tr><td style="background:#003087;padding:18px 24px;color:#FFFFFF">
-  <div style="font-size:13px;opacity:.8">KubePay vault · #${shortId(v.id)}</div>
+  <div style="font-size:13px;opacity:.8">PayPalVault vault · #${shortId(v.id)}</div>
   <div style="font-size:20px;font-weight:700;margin-top:2px">${escape(v.name)}</div>
 </td></tr>
 <tr><td style="padding:24px">
   <div style="font-size:18px;font-weight:700;color:${color};margin-bottom:12px">${escape(b.headline)}</div>
   <p style="margin:0 0 16px;color:#0C0C0D;font-size:15px;line-height:1.5">Hi ${escape(v.ownerName)},<br>${escape(b.intro)}</p>
+  ${b.image && /^https:\/\//.test(b.image) ? `<img src="${escape(b.image)}" alt="" width="140" style="display:block;width:140px;max-width:100%;height:auto;border-radius:8px;border:1px solid #E5E7EB;margin:0 0 16px">` : ''}
   <table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;line-height:1.4;margin-bottom:16px">${rows}</table>
   ${b.outro ? `<p style="margin:0 0 20px;color:#444749;font-size:14px;line-height:1.5">${escape(b.outro)}</p>` : ''}
   ${b.actions?.length

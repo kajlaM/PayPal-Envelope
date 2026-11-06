@@ -1,5 +1,5 @@
-import { failOutflow, prisma } from '@kubepay/db';
-import { getPayout, PayPalApiError, sendPayout, type PayoutItemStatus } from '@kubepay/paypal';
+import { failOutflow, prisma } from '@paypalvault/db';
+import { getPayout, PayPalApiError, sendPayout, type PayoutItemStatus } from '@paypalvault/paypal';
 import { emit } from '../events.ts';
 import { onPayoutFailed, onPayoutSucceeded } from './settle.ts';
 
@@ -45,7 +45,7 @@ export async function resumeStuckPayouts(olderThanMs = 2 * 60_000) {
     const receiverEmail = entry.type === 'SPEND' ? entry.merchant?.sandboxEmail : entry.vault.user.paypalEmail;
     if (!receiverEmail) continue;
     try {
-      const payout = await sendPayout({ ledgerEntryId: entry.id, receiverEmail, amountCents: entry.amountCents, note: entry.note ?? 'KubePay payout' });
+      const payout = await sendPayout({ ledgerEntryId: entry.id, receiverEmail, amountCents: entry.amountCents, note: entry.note ?? 'PayPalVault payout' });
       await prisma.ledgerEntry.update({ where: { id: entry.id }, data: { paypalRef: payout.payoutBatchId } });
     } catch (err) {
       console.error(`Could not resume payout for ledger entry ${entry.id}:`, (err as Error).message);
@@ -62,7 +62,7 @@ export async function payOutLiquidation(entryId: string) {
       ledgerEntryId: entry.id,
       receiverEmail: entry.vault.user.paypalEmail,
       amountCents: entry.amountCents,
-      note: `KubePay: unused balance returned from vault "${entry.vault.name}"`,
+      note: `PayPalVault: unused balance returned from vault "${entry.vault.name}"`,
     });
     await prisma.ledgerEntry.update({ where: { id: entry.id }, data: { paypalRef: payout.payoutBatchId } });
     return payout;

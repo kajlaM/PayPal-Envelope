@@ -1,9 +1,9 @@
-import { prisma, type LedgerEntry, type Merchant } from '@kubepay/db';
-import { getCapture, payMerchantWithCheckout, PayPalApiError, type CheckoutPayment } from '@kubepay/paypal';
-import { SpendRequestSchema, type SpendRequest } from '@kubepay/policy';
+import { prisma, type LedgerEntry, type Merchant } from '@paypalvault/db';
+import { getCapture, payMerchantWithCheckout, PayPalApiError, type CheckoutPayment } from '@paypalvault/paypal';
+import { SpendRequestSchema, type SpendRequest } from '@paypalvault/policy';
 import { onPayoutFailed, onPayoutSucceeded } from './settle.ts';
 
-// Vault purchases paid with PayPal Checkout. The vault still pays by itself (money in the KubePay
+// Vault purchases paid with PayPal Checkout. The vault still pays by itself (money in the PayPalVault
 // platform account), but each purchase is a real PayPal purchase from the platform's saved PayPal
 // account to the merchant: PayPal buyer protection, a receipt, and a normal refund button.
 //
@@ -33,7 +33,7 @@ function checkoutInput(entry: LedgerEntry, merchant: Merchant, request: SpendReq
     merchantEmail: merchant.sandboxEmail,
     amountCents: entry.amountCents,
     itemName: request.reason,
-    description: `KubePay vault purchase at ${merchant.name}`,
+    description: `PayPalVault vault purchase at ${merchant.name}`,
     productUrl: request.product_url,
   };
 }

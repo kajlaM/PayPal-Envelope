@@ -48,7 +48,7 @@ export function extractListing(html: string): Omit<Listing, 'verifiedBy'> {
 export async function verifyListing(url: string): Promise<Listing> {
   const key = kernelKey();
   if (!key) {
-    const res = await fetch(url, { headers: { 'user-agent': 'KubePay-Agent/0.1' } });
+    const res = await fetch(url, { headers: { 'user-agent': 'PayPalVault-Agent/0.1' } });
     if (!res.ok) throw new Error(`Could not open ${url} (${res.status})`);
     return { ...extractListing(await res.text()), verifiedBy: 'fetch' };
   }

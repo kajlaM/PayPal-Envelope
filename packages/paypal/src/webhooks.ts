@@ -1,5 +1,7 @@
 import { platformCredentials, utilityCredentials, webhookId, utilityWebhookId, type Credentials } from './config.ts';
 import { paypalRequest } from './http.ts';
+import { patchSchema, webhookListSchema, webhookSchema } from 'invoices';
+import { paypalRest, toModel } from './rest-sdk.ts';
 
 // Webhooks API: register our URL with PayPal, and confirm a webhook really came from PayPal.
 // Each REST app has its own webhooks: the platform app (funding, payouts, subscriptions) and the
@@ -7,7 +9,7 @@ import { paypalRequest } from './http.ts';
 
 export type WebhookApp = 'platform' | 'utility';
 
-/** Event types KubePay subscribes to, per app. */
+/** Event types PayPalVault subscribes to, per app. */
 export const WEBHOOK_EVENTS: Record<WebhookApp, readonly string[]> = {
   platform: [
     'CHECKOUT.ORDER.APPROVED',
@@ -68,7 +70,8 @@ export type Webhook = { id: string; url: string; events: string[] };
 
 /** GET /v1/notifications/webhooks */
 export async function listWebhooks(app: WebhookApp): Promise<Webhook[]> {
-  const body = await paypalRequest(creds(app), 'GET', '/v1/notifications/webhooks');
+  const body = await paypalRest(app, (c) => c.webhooks.webhooksList({}), webhookListSchema,
+    () => paypalRequest(creds(app), 'GET', '/v1/notifications/webhooks'));
   return (body.webhooks ?? []).map((w: any) => ({ id: w.id, url: w.url, events: w.event_types.map((e: any) => e.name) }));
 }
 
@@ -77,16 +80,15 @@ export async function upsertWebhook(app: WebhookApp, url: string): Promise<Webho
   const event_types = WEBHOOK_EVENTS[app].map((name) => ({ name }));
   const existing = (await listWebhooks(app)).find((w) => w.url === url);
   if (existing) {
-    await paypalRequest(creds(app), 'PATCH', `/v1/notifications/webhooks/${existing.id}`, {
-      body: [{ op: 'replace', path: '/event_types', value: event_types }],
-    });
+    const patch = [{ op: 'replace', path: '/event_types', value: event_types }];
+    await paypalRest(app, (c) => c.webhooks.webhooksUpdate({ webhookId: existing.id, body: patch.map((p) => toModel(patchSchema, p)) }));
     return { ...existing, events: [...WEBHOOK_EVENTS[app]] };
   }
-  const created = await paypalRequest(creds(app), 'POST', '/v1/notifications/webhooks', { body: { url, event_types } });
+  const created = await paypalRest(app, (c) => c.webhooks.webhooksPost({ body: toModel(webhookSchema, { url, event_types }) }), webhookSchema);
   return { id: created.id, url: created.url, events: [...WEBHOOK_EVENTS[app]] };
 }
 
 /** DELETE /v1/notifications/webhooks/{id} */
 export async function deleteWebhook(app: WebhookApp, id: string) {
-  await paypalRequest(creds(app), 'DELETE', `/v1/notifications/webhooks/${id}`);
+  await paypalRest(app, (c) => c.webhooks.webhooksDelete({ webhookId: id }));
 }

@@ -1,5 +1,5 @@
-import { failFunding, LedgerError, prisma, startLiquidation } from '@kubepay/db';
-import { PolicySchema } from '@kubepay/policy';
+import { failFunding, LedgerError, prisma, startLiquidation } from '@paypalvault/db';
+import { PolicySchema } from '@paypalvault/policy';
 import { emit } from '../events.ts';
 import { resumeStuckCheckouts, syncPendingCheckouts } from './checkout.ts';
 import { cancelOpenFundRequests, syncFundRequests } from './fund-requests.ts';

@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
     server: { port: 5173, strictPort: true }, // Zapier alert links point here (DASHBOARD_URL)
     define: {
       'import.meta.env.VITE_PAYPAL_CLIENT_ID': JSON.stringify(env.VITE_PAYPAL_CLIENT_ID || env.PAYPAL_CLIENT_ID || ''),
+      'import.meta.env.VITE_BRYNTUM_LICENSE_KEY': JSON.stringify(env.BRYNTUM_LICENSE_KEY?.trim() || ''),
     },
   };
 });

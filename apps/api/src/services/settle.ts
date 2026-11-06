@@ -1,6 +1,6 @@
-import { completeOutflow, failOutflow, prisma } from '@kubepay/db';
-import { recordInvoicePayment } from '@kubepay/paypal';
-import { SpendRequestSchema } from '@kubepay/policy';
+import { completeOutflow, failOutflow, prisma } from '@paypalvault/db';
+import { recordInvoicePayment } from '@paypalvault/paypal';
+import { SpendRequestSchema } from '@paypalvault/policy';
 import { emit } from '../events.ts';
 
 // One place that settles a payout result, used by the sync route now and by webhooks in Step 9.

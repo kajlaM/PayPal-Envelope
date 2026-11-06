@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { z } from 'zod';
-import { askAudit, auditEnabled, searchAudit } from '@kubepay/audit';
+import { askAudit, auditEnabled, searchAudit } from '@paypalvault/audit';
+import { AuditAskBody, AuditSearchQuery } from '../api-schemas.ts';
 import { HttpError, requireInternalKey } from '../http.ts';
 import { reindexAll } from '../services/audit.ts';
 
@@ -14,13 +14,13 @@ auditRouter.use((_req, _res, next) => {
 });
 
 auditRouter.get('/search', async (req, res) => {
-  const { q, vaultId } = z.object({ q: z.string().min(2).max(300), vaultId: z.string().optional() }).parse(req.query);
+  const { q, vaultId } = AuditSearchQuery.parse(req.query);
   res.json(await searchAudit(q, { vaultId }));
 });
 
 /** Audit Copilot: a question in plain English -> an answer citing the audit records it used. */
 auditRouter.post('/ask', async (req, res) => {
-  const { question, vaultId } = z.object({ question: z.string().min(3).max(500), vaultId: z.string().optional() }).parse(req.body);
+  const { question, vaultId } = AuditAskBody.parse(req.body);
   res.json(await askAudit(question, { vaultId }));
 });
 
