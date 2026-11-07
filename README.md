@@ -1,669 +1,851 @@
-# PayPalVault: Implementation Guide
+<div align="center">
 
-This guide covers how to build PayPalVault from start to finish, step by step. For each part it lists the tool to use and where it fits.
-All money is **fake**. Every payment runs in the **PayPal Sandbox**, using sandbox accounts from [developer.paypal.com](https://developer.paypal.com).
+# 🛡️ PayPalVault
+
+### Give an AI agent a budget, not your wallet.
+
+**Policy-limited PayPal vaults for AI shopping agents, and a PayPal Business dashboard for the shops they buy from.**
+
+![PayPal Sandbox](https://img.shields.io/badge/PayPal-Sandbox-003087?logo=paypal&logoColor=white)
+![AI](https://img.shields.io/badge/AI-Claude%20%2B%20Gemini-6B4FBB)
+![AG Grid](https://img.shields.io/badge/AG%20Grid-Enterprise-0E4491)
+![Bryntum](https://img.shields.io/badge/Bryntum-Calendar%20·%20Scheduler%20·%20Gantt%20·%20TaskBoard-3F4F75)
+![APIMatic](https://img.shields.io/badge/APIMatic-Generated%20SDKs-F05A28)
+![Channel3](https://img.shields.io/badge/Channel3-Product%20data-111111)
+![TypeScript](https://img.shields.io/badge/TypeScript-Node%2020-3178C6?logo=typescript&logoColor=white)
+
+*Built for the **Build What's Next with PayPal and AI** Global Hackathon 2026. All money is sandbox money.*
+
+</div>
 
 ---
 
-## 0. How Money Moves (Sandbox Model)
+## 📖 Contents
 
-Read this first. Every later step builds on it.
+1. [The idea in one minute](#-the-idea-in-one-minute)
+2. [Two sides of one product](#-two-sides-of-one-product)
+3. [**Part 1: Personal side, PayPalVault**](#-part-1--personal-side-paypalvault)
+   - [What a person can do](#11-what-a-person-can-do)
+   - [Vault types and control modes](#12-vault-types-and-control-modes)
+   - [Creating a vault](#13-creating-a-vault-plain-english--rules)
+   - [Funding a vault](#14-funding-a-vault-paypal-only)
+   - [The AI agents](#15-the-ai-agents)
+   - [The Policy Engine (the guardrail)](#16-the-policy-engine-the-guardrail)
+   - [Paying shops and closing vaults](#17-paying-shops-and-closing-vaults)
+   - [Managing a vault](#18-managing-a-vault)
+   - [Bryntum: calendar, timeline, board, plan](#19-bryntum-calendar-timeline-board-plan)
+   - [Answer from your inbox](#110-answer-from-your-inbox)
+   - [Verified by PayPal](#111-verified-by-paypal)
+   - [Audit Copilot](#112-audit-copilot-elastic)
+   - [Operations dashboard (React)](#113-operations-dashboard-react--apps-web)
+4. [**Part 2: Business side, the seller dashboard**](#-part-2--business-side-the-seller-dashboard)
+   - [The confidentiality rule](#21-the-confidentiality-rule)
+   - [The PayPal Business home](#22-the-paypal-business-home)
+   - [The AG Grid Enterprise transactions grid](#23-the-ag-grid-enterprise-transactions-grid)
+   - [Ask the grid in plain English](#24-ask-the-grid-in-plain-english)
+   - [Agent-era insights](#25-agent-era-insights)
+   - [Accountant report and TV mode](#26-accountant-report-and-tv-mode)
+   - [Where the seller data comes from](#27-where-the-seller-data-comes-from)
+5. [How money moves](#-how-money-moves)
+6. [Architecture](#-architecture)
+7. [Tech and sponsor tools](#-tech-and-sponsor-tools)
+8. [Getting started](#-getting-started)
+9. [Configuration (.env)](#-configuration-env)
+10. [API reference](#-api-reference)
+11. [Data model](#-data-model)
+12. [Safety guarantees](#-safety-guarantees)
+13. [Testing](#-testing)
+14. [Deploying to Render](#-deploying-to-render)
+15. [Demo script](#-demo-script)
+16. [Project layout](#-project-layout)
 
-| Sandbox account | Type | Plays the role of |
+---
+
+## 💡 The idea in one minute
+
+AI agents can already shop. The problem is trust: nobody wants to hand an agent their PayPal account.
+
+**PayPalVault** puts a small, rule-bound wallet between you and the agent:
+
+```text
+  "Buy me noise-cancelling headphones, max $45, before Sunday. Ask me first."
+                                    │
+                         AI turns it into rules
+                                    ▼
+   ┌──────────────── Vault: $50, ends Sunday, Ask me ────────────────┐
+   │  AI agent searches  ──►  asks to buy  ──►  Policy Engine decides  │
+   │                                          (fixed code, not AI)    │
+   └──────────────────────────────────┬───────────────────────────────┘
+                                      ▼
+            ✅ approve  ·  ⛔ block  ·  🙋 ask the owner (app or email)
+                                      ▼
+            PayPal pays the shop  ·  leftovers refunded when the vault ends
+```
+
+- 🧠 **The AI writes the rules and does the shopping.** It **never** decides whether money moves.
+- 🛡️ **A deterministic Policy Engine** checks every purchase: budget, per-item limit, shop, category, daily limit, live price, duplicates, unusual spending.
+- 💸 **Every cent moves through PayPal** (Orders, Checkout, Payouts, Subscriptions, Invoicing), and every payment is **checked against PayPal's own records**.
+- 🏪 **Shops get a PayPal Business dashboard** that recognises AI-agent sales without revealing anything about the buyer.
+
+---
+
+## 🧭 Two sides of one product
+
+| | 👤 **Personal: PayPalVault** | 🏪 **Business: seller dashboard** |
 | :--- | :--- | :--- |
-| `paypalvault-platform@...` | Business | PayPalVault itself. It holds all vault money and owns the REST app. |
-| `user@...` | Personal | The end user who funds vaults and receives refunds. |
-| `audio-store@...` | Business | Merchant for the shopping vault. |
-| `city-utility@...` | Business | Merchant for the utility bill vault. It sends invoices. |
-
-```
-User (personal)  ──Orders API (pay)──►  PayPalVault Platform (business)  ──Payouts API──►  Merchant (business)
-       ▲                                         │
-       └──────────Payouts API (unused balance)───┘
-User ──Subscriptions API (monthly auto top-up)──► PayPalVault Platform
-```
-
-- **Vault** = a row in our database with a budget, a balance, and a policy. The real money sits in the platform account. Our **ledger** tracks how much belongs to each vault.
-- **Fund a vault** → the user pays the platform through the **Orders API** (PayPal button).
-- **Agent spends** → the Policy Engine approves the payment, then the platform pays the merchant with **PayPal Checkout** (Orders API, merchant = payee, paid from the platform's saved PayPal: a real purchase with buyer protection). Until the platform account is saved (`npm run setup:checkout -w apps/api`), or if PayPal refuses a Checkout payment, it uses the **Payouts API** instead. Utility bills always use Payouts.
-- **Vault expires** → the platform returns the leftover balance to the user with the **Payouts API**.
-- Real store names such as "BestBuy" map to our sandbox merchant accounts through a `merchants` table, because real stores cannot receive sandbox money.
-
-**Core rule:** an AI agent never calls PayPal directly. Every money-moving call goes through the Policy Engine first.
+| **Who** | A PayPal user who lets an AI agent shop or pay bills | A shop that receives payments from AI agents (and everyone else) |
+| **Where** | Wallet site `http://localhost:3000` (+ ops console `:5173`) | Same site, `http://localhost:3000/business` |
+| **Log in as** | `kajla` / `1234` · `jugal` / `1234` | `audiostore` / `12345678` · `cityutility` / `12345678` |
+| **Sees** | Their own vaults, rules, agent logs, approvals, refunds | **Payments received only.** Never a customer's rules, budget, limits or missed sales |
+| **Star tools** | AI agents · Policy Engine · Bryntum (4 products) · Channel3 · Elastic | AG Grid **Enterprise** · AG Charts Enterprise · plain-English grid AI |
 
 ---
 
-## 1. Tool Map (What Is Used Where)
+# 👤 Part 1 · Personal side: PayPalVault
 
-| Tool | Used for | Step |
+## 1.1 What a person can do
+
+| | Feature | In one line |
+| :---: | :--- | :--- |
+| ✍️ | **Describe, don't configure** | Type what you want in plain English; AI turns it into rules you review before anything happens. |
+| 🔗 | **Start from a product link** | Paste a store link; Channel3 fills in the item, the price, other stores and its 90-day price history. |
+| 💳 | **Fund with PayPal** | Pay now from your linked PayPal, **Pay Later** (Pay in 4), or **ask a friend** to fund it with a PayPal money request. |
+| 🐷 | **Save first, then shop** | `$20 every week` from your PayPal until the goal is reached; then the agent shops. |
+| 🤖 | **Agent shops for you** | Searches approved stores, compares prices, checks the live price, asks to buy. |
+| 🙋 | **You stay in control** | *Ask me* (pick from top 3), *Ask above $X*, or *Autopilot*: always inside the rules. |
+| 📧 | **Approve from email** | Approve / Reject / Pick buttons in the alert email; password needed to spend. |
+| 🗓️ | **See everything on a calendar** | Bryntum Calendar, Timeline (with **Replay**), Board and Plan; drag to reschedule. |
+| ✅ | **Verified by PayPal** | Every payment checked read-only against PayPal's own records. |
+| 💬 | **Ask "why?"** | Audit Copilot answers from cited audit records: *"Why was my purchase blocked?"* |
+| ↩️ | **Leftovers come home** | When a vault ends, PayPal Payouts returns what's left to your PayPal. |
+
+## 1.2 Vault types and control modes
+
+**Three vault types**
+
+| Type | What the agent does | Paid with |
 | :--- | :--- | :--- |
-| **PayPal Developer Dashboard** | Sandbox accounts, REST app, feature toggles, webhooks, webhook simulator | 2 |
-| **PayPal Orders API v2** | User funds a vault | 5 |
-| **PayPal JS SDK (Buttons)** | PayPal button the user clicks to fund a vault or subscribe | 5, 13 |
-| **PayPal Payouts API** | Paying merchants and returning leftover vault money | 5, 10 |
-| **PayPal Subscriptions API** (+ Catalog Products) | Monthly auto top-up of the utility vault | 5 |
-| **PayPal Invoicing API v2** | Utility merchant sends bills; the bill-pay agent reads them | 8 |
-| **PayPal Webhooks API** | Confirms captures, payouts, and subscription payments | 9 |
-| **PayPal Agent Toolkit** (`@paypal/agent-toolkit`) | Ready-made PayPal tools for agents (invoices, orders, transactions), wrapped by the policy gate | 8 |
-| **PayPal MCP Server** (`@paypal/mcp`) | Dev-time only: lets your AI coding assistant query the sandbox | 1 |
-| **PayPal Server SDK** (`@paypal/paypal-server-sdk`) | Typed client for Orders and Subscriptions | 4 |
-| **APIMatic** | Generated the PayPal Server SDK we use; Context Plugin gives your IDE AI PayPal docs | 4 |
-| **Claude API** (`claude-sonnet-5-5`, `claude-haiku-5-5`) | Converts plain English into policy JSON, runs agent reasoning, powers the audit copilot | 6, 8, 11 |
-| **Vercel AI SDK** (`ai`, `@ai-sdk/anthropic`) | Agent loop and tool calling | 8 |
-| **Zod** | Schema validation for policies and tool inputs | 6, 7 |
-| **Channel3 API** | Product search for the shopping agent | 8 |
-| **Kernel** (`@onkernel/sdk` + Playwright) | Cloud browser that opens the product page and verifies the live price and merchant | 8 |
-| **PostgreSQL** (Render Postgres) + **Prisma** | Vaults, policies, ledger, merchants, decisions | 3 |
-| **Elasticsearch** (Elastic Cloud) | Audit log (keyword + semantic search), spend history for spotting unusual spending, copilot retrieval | 11 |
-| **Socket.IO** | Live updates pushed to the dashboard | 13 |
-| **Zapier** (Webhooks by Zapier → Slack/Gmail) | Alerts on blocked payments and liquidations | 12 |
-| **React + Vite** | Dashboard app | 13 |
-| **AG Grid** | Vaults grid, ledger grid, live policy decision log | 13 |
-| **Bryntum Scheduler** | Timeline of vault lifetimes and expiry | 13 |
-| **Postman** | API collections for PayPal sandbox and PayPalVault endpoints | 14 |
-| **Render** | Hosting for the API (Web Service), the dashboard (Static Site), the expiry sweeper (Cron Job), and Postgres | 15 |
+| 🛍️ **SHOPPING** | Finds and buys one item, or a **shopping list** (up to 10 items, each with its own max price; leftover budget can roll over to later items) | PayPal Checkout (buyer protection), Payouts as fallback |
+| 🧾 **UTILITY** | **Bill-pay agent** reads the utility's PayPal invoices and pays the open ones that match | Payouts; the invoice is then marked paid in PayPal. Optional monthly **PayPal Subscription** tops the vault up |
+| 🐷 **SAVINGS** | No agent: `$X every day / week / month` is taken from your saved PayPal until the goal. A shopping vault can **save first** and shop once the goal is reached | PayPal saved-account payments (Vault API) |
 
----
+**Three control modes** (the *Ask me* switch on the create screen and the vault page)
 
-## 2. Set Up the PayPal Sandbox
+| Mode | Behaviour |
+| :--- | :--- |
+| **Ask me** | The agent proposes its **top 3 options** (photo, price, pros/cons, stores compared, price history). Nothing is bought until you pick one. |
+| **Ask above $X** | Buys alone up to `$X`, asks you above it. |
+| **Autopilot** | Buys alone, always within the rules. |
 
-Tool: **PayPal Developer Dashboard** (developer.paypal.com → log in → Sandbox)
+## 1.3 Creating a vault: plain English → rules
 
-1. **Create a shared developer account** for the team instead of using anyone's personal PayPal account.
-2. **Testing Tools → Sandbox Accounts:** create the 4 accounts from Step 0. Give the `user` account a large sandbox balance, for example $5,000.
-3. **Apps & Credentials → Create App** (Sandbox, merchant type), linked to `paypalvault-platform`. Copy the **Client ID** and **Secret**.
-4. In the app's **Features** section, turn on: **Payouts**, **Subscriptions**, **Invoicing**, and **Save payment methods**.
-5. Create a **second app** linked to `city-utility`. The utility merchant uses it to send invoices (Step 8).
-6. **Webhooks:** no clicking needed. `npm run setup:webhooks` registers them on both apps by API once you have a public URL (Step 9).
-7. **Negative testing:** turn it on for the platform account. Failures can then be simulated with the `PayPal-Mock-Response` header (Step 14).
-
-Sandbox base URL: `https://api-m.sandbox.paypal.com`. Review mock transactions at `https://www.sandbox.paypal.com` by logging in as any sandbox account.
-
----
-
-## 3. Repo, Database, and Ledger
-
-### 3.1 Repo structure (npm workspaces, TypeScript)
-
-```
-paypalvault/
-├── apps/
-│   ├── api/            # Express server: REST + webhooks + Socket.IO
-│   ├── web/            # React + Vite dashboard
-│   └── sweeper/        # Cron job: calls the API tick (expiry + refunds + agent watch)
-├── packages/
-│   ├── paypal/         # PayPal service layer (Step 4)
-│   ├── policy/         # Policy compiler + engine (Steps 6–7)
-│   ├── agents/         # Shopping + bill-pay agents (Step 8)
-│   ├── audit/          # Elastic audit log, anomaly score, Audit Copilot (Step 11)
-│   └── db/             # Prisma schema + client
-├── postman/            # Postman collections
-└── .env
+```text
+Buy / Save  ─►  Amount · Description · Ask me switch · Pay: [Pay now] [Pay later] [Ask a friend]
+            ─►  AI compiles the rules  ─►  Review (only real problems are flagged)  ─►  Password  ─►  Done
 ```
 
-### 3.2 `.env`
+1. **The AI writes a draft** (`packages/policy/src/compiler.ts`): Claude first, Gemini as automatic backup, via the Vercel AI SDK `generateObject` + **Zod**. It knows the current time, your time zone and the registered shops, so *"before Sunday"* becomes an exact timestamp.
+2. **Code fixes the draft** (`normalizeDraft`): USD only, budget between $0 and $10,000, per-item limit ≤ budget, only registered shops, end date 7 days by default and 90 at most (2 years for savings). Every change becomes a warning.
+3. **You review it.** The yellow box shows only real problems: a shop removed, an item limit over budget, a list cut to 10 items, an end date shortened.
 
-```env
-PAYPAL_CLIENT_ID=...
-PAYPAL_CLIENT_SECRET=...
-PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com
-PAYPAL_WEBHOOK_ID=...
-UTILITY_CLIENT_ID=...
-UTILITY_CLIENT_SECRET=...
-USER_SANDBOX_EMAIL=user@...
-ANTHROPIC_API_KEY=...
-CHANNEL3_API_KEY=...
-KERNEL_API_KEY=...
-ELASTIC_URL=...
-ELASTIC_API_KEY=...
-ZAPIER_HOOK_URL=...
-DATABASE_URL=postgres://...
+> The LLM only **writes** the policy. It never **decides** whether a payment goes through.
+
+## 1.4 Funding a vault (PayPal only)
+
+| Option | How it works | PayPal API |
+| :--- | :--- | :--- |
+| **Pay now** | Taken from your PayPal account, linked once in a popup on `sandbox.paypal.com` (saved payment method) | Vault (saved PayPal) + Orders v2 |
+| **Pay Later** | PayPal's Pay in 4: the vault gets the full amount now, you repay PayPal in 4 parts (US, $30–$1,500) | JS SDK Pay Later + Orders v2 |
+| **PayPal button** | Classic approve-and-capture flow (ops console) | JS SDK + Orders v2 |
+| **Ask a friend** | The platform sends a **PayPal money request** to a friend; their payment goes straight into the vault. Friends see it under *"Money requests for you"* | Invoicing v2 |
+| **Monthly top-up** | Utility vaults only | Subscriptions + Catalog Products |
+| **Savings plan** | `$X every day / week / month`, pause / resume / pay now / move the next payment | Saved PayPal (Vault) |
+
+## 1.5 The AI agents
+
+Each agent lives **inside one vault** and only knows that vault. It talks to PayPalVault through the APIMatic-generated SDK, which exposes only **four calls**: read the vault, list shops, **ask to buy**, propose options. There is no call that pays, approves, refunds or closes.
+
+### 🛍️ Shopping agent (`packages/agents/src/shopping.ts`)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as 🤖 Shopping agent (AI)
+    participant C3 as Channel3
+    participant K as Kernel browser
+    participant PE as 🛡️ Policy Engine
+    participant O as 🙋 Owner
+    participant PP as PayPal
+    A->>C3: find_candidates("wireless headphones")
+    C3-->>A: products from approved stores only
+    Note over A: rank.ts (plain code): drop wrong model,<br/>used, low rating, slow delivery, over budget
+    A->>A: skip_candidates (AI removes cases, cables, …)
+    A->>K: buy_next → open the product page
+    K-->>A: live price
+    Note over A: Channel3: same model cheaper elsewhere?<br/>price far above its 90-day normal? → wait
+    A->>PE: requestPurchase(merchant, amount, verified_price, …)
+    alt every rule passes
+        PE->>PP: pay the shop (Checkout / Payouts)
+    else a soft rule (above $X, unverified price, unusual)
+        PE->>O: approval needed (app + email)
+        O->>PE: approve (password) → rules re-checked
+        PE->>PP: pay the shop
+    else a hard rule fails
+        PE-->>A: BLOCK + reasons → try the next candidate
+    end
 ```
 
-### 3.3 Database tables (Prisma)
+- **Filtering and ranking are code, not AI** (`rank.ts`): required keywords, condition (new only), min rating, max delivery days, preferred keywords, and ranking weights for price / rating / delivery / model match.
+- **Channel3 drives decisions** (`channel3.ts`):
+  - **Compare stores:** the same model (same brand + model code, e.g. `WH-CH530`) at every approved store; the cheapest wins.
+  - **Price history:** today's price vs. its **90-day** low / average. Clearly high → the agent **waits** (`WAITING_FOR_PRICE`) and checks again later.
+  - **Savings:** every vault reports what Channel3 data saved.
+- **Kernel** opens the product page in a cloud browser to read the **live price** (plain fetch as fallback). A different live price → `PRICE_MISMATCH` → next candidate.
+- **Watch mode:** no match → look again every `check_every_minutes` until the vault ends. Funding starts the watch; a rejected pick restarts it.
+- **Demo store** (`/demo-store`): price traps, used items, low ratings, slow delivery, an unapproved shop, and a **price drop** you can trigger live for judges.
 
-| Table | Key columns |
+### 🧾 Bill-pay agent (`packages/agents/src/billpay.ts`)
+
+Reads the utility's invoices with the **PayPal Agent Toolkit** (read-only actions: `invoices.list`, `invoices.get`), and asks to pay each open invoice addressed to the platform. The engine re-checks the invoice **with PayPal** (exists, issued by this merchant, still open, exact total) before paying. After the payout succeeds, the invoice is recorded as paid in PayPal.
+
+> No money-moving toolkit action is turned on. Money moves only through the Policy Engine.
+
+## 1.6 The Policy Engine (the guardrail)
+
+`packages/policy/src/engine.ts`: plain TypeScript, no AI, **32 unit tests**. It returns `APPROVE`, `BLOCK` or `NEEDS_HUMAN`, plus **every** reason (not just the first).
+
+<table>
+<tr><th>⛔ Hard rules → <code>BLOCK</code></th><th>🙋 Soft rules → <code>NEEDS_HUMAN</code></th></tr>
+<tr><td>
+
+| Check | Reason code |
 | :--- | :--- |
-| `vaults` | id, name, type (`SHOPPING` / `UTILITY`), budget, balance, status (`PENDING_FUNDING` / `ACTIVE` / `EXPIRED` / `LIQUIDATED`), expires_at |
-| `policies` | vault_id, policy_json, version, created_from_text |
-| `users` | id, name, paypal_email (each vault belongs to a user, like UPI Lite) |
-| `ledger_entries` | vault_id, type (`FUND` / `SPEND` / `LIQUIDATE`), status (`PENDING` / `COMPLETED` / `FAILED`), amount_cents, paypal_ref |
-| `merchants` | name, category, sandbox_email, approved |
-| `decisions` | vault_id, request_json, result (`APPROVE` / `BLOCK` / `NEEDS_HUMAN`), reasons[], created_at |
-| `paypal_events` | webhook event id (unique), type, payload, processed |
+| Vault active, not expired | `VAULT_INACTIVE` / `VAULT_EXPIRED` |
+| Amount ≤ per-item limit | `MAX_LIMIT_EXCEEDED` |
+| Amount ≤ vault balance | `INSUFFICIENT_VAULT_BALANCE` |
+| Shop approved + registered | `MERCHANT_NOT_APPROVED` / `_REGISTERED` |
+| Category allowed (tree: Headphones → Audio → Electronics) | `CATEGORY_NOT_ALLOWED` |
+| Daily purchase count | `DAILY_LIMIT_REACHED` |
+| Listed price = live price | `PRICE_MISMATCH` |
+| Shopping-list item limit | item-limit codes |
+| Bill: invoice exists, from this shop, open, exact total | `INVOICE_*` |
 
-Rules:
-- Store money as **integer cents**.
-- Vault `balance` changes only through ledger entries, inside a DB transaction that uses `SELECT ... FOR UPDATE` on the vault row. This prevents double spending when two agent calls arrive at once.
-
----
-
-## 4. PayPal Service Layer (`packages/paypal`)
-
-One module wraps every PayPal call. Nothing else in the code talks to PayPal.
-
-Two tools are used:
-- **PayPal Server SDK** (`@paypal/paypal-server-sdk`, generated by **APIMatic**) for Orders and Subscriptions.
-- A small typed REST client (`src/http.ts`, built-in `fetch`) for the APIs the SDK does not cover: Payouts, Invoicing, Catalog Products, Webhooks.
-
-| File | Function | PayPal endpoint | Tool |
-| :--- | :--- | :--- | :--- |
-| `http.ts` | `getAccessToken()` | `POST /v1/oauth2/token` (cached until it expires) | fetch |
-| `orders.ts` | `createOrder({ vaultId, amountCents })` | `POST /v2/checkout/orders` (intent `CAPTURE`, `custom_id` = vaultId) | Server SDK |
-| `orders.ts` | `captureOrder(orderId)` | `POST /v2/checkout/orders/{id}/capture` | Server SDK |
-| `payouts.ts` | `sendPayout({ ledgerEntryId, receiverEmail, amountCents })` | `POST /v1/payments/payouts` | fetch |
-| `payouts.ts` | `getPayout(batchId)` | `GET /v1/payments/payouts/{id}` | fetch |
-| `subscriptions.ts` | `createProduct()` | `POST /v1/catalogs/products` | fetch |
-| `subscriptions.ts` | `createMonthlyPlan()` / `getSubscription()` / `cancelSubscription()` | `/v1/billing/plans`, `/v1/billing/subscriptions` | Server SDK |
-| `invoicing.ts` | `createInvoice()` / `sendInvoice()` / `listInvoices()` / `getInvoice()` | `/v2/invoicing/invoices` (utility app credentials) | fetch |
-| `invoicing.ts` | `recordInvoicePayment()` | `POST /v2/invoicing/invoices/{id}/payments` (utility app credentials) | fetch |
-| `webhooks.ts` | `verifyWebhook(headers, rawBody, app)`, `upsertWebhook(app, url)`, `listWebhooks`, `deleteWebhook` | `POST /v1/notifications/verify-webhook-signature`, `/v1/notifications/webhooks` | fetch |
-
-Rules for every POST:
-- Send a unique `PayPal-Request-Id` header (idempotency), so a retry never double-pays.
-- For Payouts, `sender_batch_id` and `sender_item_id` = our ledger entry id.
-- Every function takes an optional `mockResponse` for negative testing.
-
-Commands:
-- `npm run smoke -w @paypalvault/paypal` checks every API against the sandbox.
-- `npm run setup:plan -w @paypalvault/paypal` creates the utility top-up plan once. Copy the printed id into `.env` as `PAYPAL_UTILITY_PLAN_ID`.
-
-Dev helper: add the **PayPal MCP server** to your AI coding assistant (`npx -y @paypal/mcp --tools=all` with `PAYPAL_ENVIRONMENT=SANDBOX`). You can then check sandbox orders and payouts while building. Also install the **APIMatic Context Plugin** so the assistant has PayPal API context.
-
----
-
-## 5. Vault Lifecycle API (`apps/api`)
-
-Tool: **Express** routes that call `packages/paypal` + `packages/policy`. Run it with `npm run api:dev` (port 4000). Socket.IO sends `vault:updated`, `decision:created` and `ledger:updated` events.
-
-| Route | What it does |
-| :--- | :--- |
-| `POST /api/vaults/compile` | Plain English -> policy preview + warnings (Step 6). Nothing saved. |
-| `POST /api/vaults` | Takes the confirmed `{ policy, sourceText }` and saves the vault as `PENDING_FUNDING`. |
-| `POST /api/vaults/:id/fund/order` | Calls `createOrder` for the vault budget and returns the `orderId` to the PayPal button. |
-| `POST /api/vaults/:id/fund/capture` | Calls `captureOrder`, writes a `FUND` ledger entry, and sets status to `ACTIVE`. |
-| `POST /api/vaults/:id/subscribe` | Utility vault only. Returns `planId` + `customId` for the PayPal subscription button. |
-| `POST /api/vaults/:id/subscribe/confirm` | Checks the new subscription with PayPal and saves its id on the vault. |
-| `POST /api/vaults/:id/spend` | **Agents only** (needs the `x-internal-key` header = `INTERNAL_API_KEY`). Runs the Policy Engine. If approved, it holds the money and calls `sendPayout` to the merchant. |
-| `POST /api/vaults/:id/decisions/:decisionId/approve` / `reject` | A human approves or rejects a `NEEDS_HUMAN` decision from the dashboard. Approve re-checks the rules first. |
-| `POST /api/vaults/:id/sync` | Asks PayPal for the status of pending payouts and settles the ledger. Works without webhooks. |
-| `POST /api/vaults/:id/liquidate` | Manual teardown: returns the leftover balance to the user with Payouts. Step 10 does the same on expiry. |
-| `GET /api/vaults`, `/api/vaults/:id`, `/api/ledger`, `/api/decisions`, `/api/merchants` | Data for AG Grid. |
-
-**Funding flow:**
-1. The dashboard shows a **PayPal JS SDK button**.
-2. `createOrder` calls the backend → the user logs in as the sandbox `user` and approves.
-3. `onApprove` calls the backend capture → the vault becomes **ACTIVE**.
-
-**Subscription flow (utility vault):**
-1. Create one Catalog Product plus a monthly Plan with Step 4 functions (one-time setup script).
-2. The JS SDK button is loaded with `vault=true&intent=subscription`.
-3. Each `PAYMENT.SALE.COMPLETED` webhook adds a `FUND` ledger entry to that vault.
-
-**Spend flow:**
-1. Policy check runs.
-2. `reserveSpend()` creates a `SPEND` entry as `PENDING` (balance goes down right away).
-3. `sendPayout` to the merchant's sandbox email.
-4. Webhook `PAYOUTS-ITEM.SUCCEEDED` → `completeOutflow()` marks it `COMPLETED`. On failure → `failOutflow()` marks it `FAILED` and the balance comes back.
-
----
-
-## 6. Policy Compiler: Plain English to JSON (`packages/policy/src/compiler.ts`)
-
-Tool: **Claude** (`claude-sonnet-5-5`, first choice) with **Gemini** as automatic backup, through the **Vercel AI SDK** (`ai` + `@ai-sdk/anthropic` + `@ai-sdk/google`, `generateObject`) + **Zod**. If Claude has no credits or a model is busy, the next model in `src/model.ts` is tried. The response says which model answered.
-`.env`: `GOOGLE_GENERATIVE_AI_API_KEY`, and `GEMINI_MODEL` = a comma-separated list. If one model is busy or out of free quota, the next is tried. To switch to Claude, change `src/model.ts` only.
-
-1. `PolicySchema` (`src/schema.ts`) is the final policy. `PolicyDraftSchema` (`src/compiler.ts`) is a simpler shape the LLM fills.
-2. The prompt gives Gemini the current time, the user's time zone, and the registered merchants, so "before Sunday" becomes an exact timestamp.
-3. `normalizeDraft()` fixes the draft in code:
-   - It rejects non-USD amounts and budgets of $0 or over $10,000.
-   - It clamps the per-payment limit to the budget.
-   - It keeps only registered merchants, falling back to merchants of the right category.
-   - It defaults the expiry to 7 days, with a maximum of 90.
-   - Every change is returned as a warning.
-4. API:
-   - `POST /api/vaults/compile { text }` returns `{ policy, warnings }`. Nothing is saved yet.
-   - The dashboard shows the result, and the user confirms or edits it.
-   - `POST /api/vaults { policy, sourceText }` then saves the vault.
-5. Test: `npm test -w @paypalvault/policy` runs unit tests with no LLM. `npm run compile -w @paypalvault/policy -- "your sentence"` runs it against Gemini.
-
-The LLM only *writes* the policy. It never *decides* whether a payment goes through.
-
----
-
-## 7. Policy Engine: The Guardrail (`packages/policy/src/engine.ts`)
-
-Tool: **plain TypeScript functions** (deterministic, no AI), tested with **node:test** (`npm test -w packages/policy`).
-
-Input: a `SpendRequest` = `{ merchant, amount, category, reason, product_url?, verified_price?, invoice_id? }`. Before calling the engine, `apps/api/src/services/policy-context.ts` collects the facts it needs: today's spends, the registered merchant, and, for utility vaults, the PayPal invoice.
-
-**Hard rules → `BLOCK`** (all failures are listed, not just the first):
-
-| Check | Fails with |
-| :--- | :--- |
-| Vault is `ACTIVE` and not expired | `VAULT_INACTIVE` / `VAULT_EXPIRED` |
-| `amount <= max_single_transaction` | `MAX_LIMIT_EXCEEDED` |
-| `amount <= vault balance` | `INSUFFICIENT_VAULT_BALANCE` |
-| Merchant is in `approved_merchants` and registered in `merchants` | `MERCHANT_NOT_APPROVED` / `MERCHANT_NOT_REGISTERED` |
-| Category is allowed (category tree: `Headphones` → `Audio` → `Electronics`) | `CATEGORY_NOT_ALLOWED` |
-| Transactions today are under `max_transactions_per_day` | `DAILY_LIMIT_REACHED` |
-| `amount == verified_price` (Kernel check, Step 8) | `PRICE_MISMATCH` |
-| Utility vault: `invoice_id` is given, exists, and was issued by this merchant | `INVOICE_REQUIRED` / `INVOICE_NOT_FOUND` / `INVOICE_MERCHANT_MISMATCH` |
-| Utility vault: invoice is still open and not already paid | `INVOICE_NOT_OPEN` |
-| Utility vault: amount equals the invoice total | `INVOICE_MISMATCH` |
-
-**Soft rules → `NEEDS_HUMAN`** (only if no hard rule failed):
+</td><td>
 
 | Check | Flag |
 | :--- | :--- |
-| `amount > human_approval_above` | `ABOVE_HUMAN_APPROVAL_THRESHOLD` |
-| Shopping vault without `verified_price` | `PRICE_NOT_VERIFIED` |
-| Same merchant and amount within 10 minutes | `POSSIBLE_DUPLICATE` |
-| Elastic anomaly score ≥ 0.8 (Step 11) | `UNUSUAL_SPEND` |
+| Above the *Ask above $X* amount | `ABOVE_HUMAN_APPROVAL_THRESHOLD` |
+| Live price not verified | `PRICE_NOT_VERIFIED` |
+| Same shop + amount within 10 min | `POSSIBLE_DUPLICATE` |
+| Elastic anomaly score ≥ 0.8 | `UNUSUAL_SPEND` |
 
-When a human approves (`POST /api/vaults/:id/decisions/:decisionId/approve`), the engine runs again ignoring soft flags, so a hard rule can still block it.
+When the owner approves, the engine **runs again**, ignoring soft flags, so a hard rule can still block it.
 
-Output: `{ result, reasons[] }`. Every result is saved to `decisions` and sent to the dashboard over Socket.IO (later also indexed in Elastic, with blocks sent to Zapier). When a bill payout succeeds, `apps/api/src/services/settle.ts` marks the PayPal invoice as paid.
+</td></tr>
+</table>
 
----
+## 1.7 Paying shops and closing vaults
 
-## 8. AI Agents (`packages/agents`)
+- **Purchases** are paid with **PayPal Checkout** (Orders v2, shop = payee, paid from the platform's saved PayPal): buyer protection, a receipt, and item details for the shop. If Checkout isn't set up or PayPal refuses, it falls back to **Payouts**. Bills always use Payouts.
+- **Never pays twice:** the ledger entry id is the `PayPal-Request-Id`, the payout `sender_item_id` and the invoice id, so a retry is always the same payment.
+- **Holds first:** a purchase holds the money (`PENDING`) before PayPal is called; a failure gives it back.
+- **When a vault ends**, the background tick (every minute):
+  1. re-sends payouts that never got an answer, and syncs pending ones;
+  2. expires vaults that were never funded;
+  3. **refunds the leftover balance** to the owner's PayPal with Payouts (`LIQUIDATED`);
+  4. runs watch-mode agents that are due, and savings payments that are due;
+  5. runs the nightly *Verified by PayPal* check.
+- **Webhooks** are the fast path (signature-verified, stored once, safe to replay); the tick and the **Sync** button are the backstop.
 
-Tools: **Vercel AI SDK** (`generateText` with `tools`, `stopWhen: stepCountIs(12)`) + **Claude** (`claude-sonnet-5-5`), with **Gemini** as backup (same model list as Step 6). The agent only switches models if it has not tried to spend yet, so a retry never pays twice.
-Each agent runs **inside one vault** and only knows that vault's id. It can spend only through `POST /api/vaults/:id/spend` (Policy Engine, Step 7).
+## 1.8 Managing a vault
 
-How to run:
-- Dashboard / API: `POST /api/vaults/:id/agent` `{ task? }` runs it now. It picks the shopping agent for SHOPPING vaults and the bill-pay agent for UTILITY vaults. Every tool call is pushed live as a Socket.IO `agent:step` event.
-- Terminal: `npm run run -w packages/agents -- <vaultId> ["task"]` (the API must be running).
+The **Manage** page of each vault:
 
-### 8.1 Shopping Agent (`shopping.ts`, Vault A)
-
-**User preferences** live in the policy under `shopping` (the compiler fills them from plain English, e.g. "Sony headphones, new only, 4+ stars, within 5 days, rating matters more than price, check every 15 minutes"):
-
-| Field | Kind | Meaning |
-| :--- | :--- | :--- |
-| `product_query` | search | What to look for |
-| `required_keywords` | hard rule | All must be in the title, else `WRONG_MODEL` |
-| `condition` (`NEW` / `ANY`) | hard rule | `NEW` drops used/refurbished (`USED`) |
-| `min_rating` | hard rule | Below it → `LOW_RATING` (unknown rating passes, scores in the middle) |
-| `max_delivery_days` | hard rule | Slower → `SLOW_DELIVERY` (unknown passes) |
-| `preferred_keywords` | soft | Nice-to-have brands/features |
-| `weights` `{price, rating, delivery, model_match}` (0–5) | ranking | Default is price only = **cheapest first** |
-| `check_every_minutes` | watch mode | How often to look again if nothing matches (default 180) |
-
-Products are also dropped if over budget (`min(max_single_transaction, balance)` → `OVER_BUDGET`), from a merchant not in the policy, or in a category the policy does not allow. Filtering and ranking are plain code (`rank.ts`), not AI.
-
-| Agent tool | Calls | Purpose |
-| :--- | :--- | :--- |
-| `find_candidates(query?)` | **Channel3 API** (`POST /v1/search`, `x-api-key`), limited to the approved merchants' websites (`merchants.domain` → Channel3 `website_ids`) | Returns the ranked candidates and how many were dropped per reason. Channel3 gives price, rating, condition, and category path (no delivery time). |
-| `skip_candidates([{url, reason}])` | – | The AI skips items that are clearly the wrong thing (a case or cable when the user wants earbuds). |
-| `buy_next()` | **Kernel** cloud browser, then `POST /api/vaults/:id/spend` | Code takes the **next candidate in ranked order**, opens its page (`kernel.browsers.create()` → Playwright `connectOverCDP`) to read the live price, and asks the Policy Engine to buy it. Merchant, amount (listed price), `verified_price`, and category come from data, never from the AI. |
-
-Loop: find → skip wrong items → buy_next until `APPROVE`, `NEEDS_HUMAN`, or no candidates left. One item per run.
-- Live price ≠ listed price → engine blocks it (`PRICE_MISMATCH`) → buy_next tries the next one.
-- Page could not be read → no `verified_price` → engine asks a human (`PRICE_NOT_VERIFIED`).
-
-**Watch mode:** each run ends with an outcome: `BOUGHT`, `NEEDS_HUMAN`, or `NO_MATCH`.
-- `NO_MATCH` (or an error) → `vaults.nextAgentRunAt` = now + `check_every_minutes` (never after expiry). The API checks due vaults every minute in its background tick (Step 10).
-- Funding a shopping vault starts watching at once. A human rejecting the agent's pick starts it again. `POST /api/vaults/:id/agent/stop` stops it.
-- If the vault expires with nothing bought, the sweeper refunds it (Step 10).
-
-**Demo store** (`/demo-store`, used when `CHANNEL3_API_KEY` is empty or `DEMO_STORE=on`): one item per rule (price trap, used, 2.8 stars, 12-day delivery, unapproved merchant) plus a Sony at $59.99. `POST /demo-store/price-drop {"sku":"bb-sony","price":39.99}` drops its price so judges see watch mode buy it; `POST /demo-store/reset` restores it. `KERNEL_API_KEY` empty → the page is read with a plain HTTP fetch.
-
-### 8.2 Bill-Pay Agent (`billpay.ts`, Vault B)
-
-1. **Setup:** using the `city-utility` app, create and send a sandbox invoice to the platform account (`createInvoice` + `sendInvoice` from Step 4).
-2. The agent reads invoices with the **PayPal Agent Toolkit** (`@paypal/agent-toolkit/ai-sdk`), logged in as the `city-utility` app, with only read actions on:
-   ```ts
-   new PayPalAgentToolkit({ clientId, clientSecret,
-     configuration: { actions: { invoices: { list: true, get: true } }, context: { sandbox: true } } });
-   ```
-   The toolkit is built for AI SDK v4, so `toolkit.ts` adapts each tool to v5 (`parameters` → `inputSchema`) and trims PayPal's long replies.
-3. The agent keeps open invoices (SENT / UNPAID / PARTIALLY_PAID) addressed to the platform, and calls `pay_invoice(invoice_id, merchant, amount, category)` → spend API → the engine re-checks the invoice with PayPal → `sendPayout` to `city-utility`.
-4. After the payout succeeds, the backend calls `recordInvoicePayment` (Step 7), so PayPal shows the bill as paid → the `INVOICING.INVOICE.PAID` webhook arrives (Step 9).
-
-### 8.3 No money-moving toolkit tools
-
-Only read actions of the Agent Toolkit are turned on. Any action that moves money (`create_order`, `create_refund`, ...) stays off; money moves only through the spend API, so the rule "agents never hit PayPal payouts directly" holds for every tool.
-
----
-
-## 9. Webhooks (`apps/api/src/webhooks.ts`)
-
-Tool: **Express** route + **PayPal Webhooks API**. Webhooks are the fast path; the `sync` route (Step 5) stays as the fallback, and every handler is safe to run twice.
-
-**Setup (once per public URL):**
-1. Expose the API: **ngrok** or `npx cloudflared tunnel --url http://localhost:4000` locally, or the Render URL after Step 15.
-2. `npm run setup:webhooks -w packages/paypal -- https://<public-api-url>` registers (or updates) one webhook per app and prints `PAYPAL_WEBHOOK_ID` and `UTILITY_WEBHOOK_ID` for `.env`:
-   - platform app → `POST /webhooks/paypal` (funding, payouts, subscriptions)
-   - city-utility app → `POST /webhooks/paypal/utility` (its invoices)
-
-**Each delivery:**
-1. Read the raw body (mounted before `express.json`) → `verifyWebhook(headers, rawBody, app)` with that app's credentials and webhook id. Anything not `SUCCESS` → `400`. Webhook id missing → `503`.
-2. Store in `paypal_events` by event id. Already `processed` → return `duplicate`. If a handler throws, the event stays unprocessed and PayPal retries it.
-3. Route by event type, then emit Socket.IO events:
-
-| Event | Action |
+| Section | What you see / do |
 | :--- | :--- |
-| `CHECKOUT.ORDER.APPROVED` | Capture the order and credit the vault right away (`finishFunding`), no need to wait for the browser |
-| `PAYMENT.CAPTURE.COMPLETED` | Confirm the `FUND` entry (`completeFunding`) and start the shopping agent's watch |
-| `PAYMENT.CAPTURE.DENIED` | `failFunding()`: `FUND` entry → `FAILED` |
-| `PAYMENT.PAYOUTS-ITEM.SUCCEEDED` | `onPayoutSucceeded()`: `SPEND` / `LIQUIDATE` → `COMPLETED`; a bill payment also marks the PayPal invoice paid |
-| `PAYMENT.PAYOUTS-ITEM.FAILED` / `BLOCKED` / `RETURNED` / `REFUNDED` / `DENIED` / `CANCELED`, `PAYMENT.PAYOUTSBATCH.DENIED` | `onPayoutFailed()`: entry → `FAILED`, money back in the vault |
-| `PAYMENT.PAYOUTSBATCH.SUCCESS` | Backstop: sync that vault's pending payouts |
-| `BILLING.SUBSCRIPTION.ACTIVATED` | Link the subscription to the utility vault in its `custom_id` |
-| `PAYMENT.SALE.COMPLETED` | `addFunding()`: monthly top-up into the utility vault |
-| `BILLING.SUBSCRIPTION.CANCELLED` | Unlink it: no more top-ups |
-| `INVOICING.INVOICE.PAID` / `CANCELLED` | Tell the dashboard the bill's final status |
+| **Status + Ask me switch** | Change the control mode (password) |
+| **Agent logs** | Live status with a pulsing dot, and a clean log: 🔵 bought · 🟡 needs you · 🔴 blocked |
+| **Options to pick** (Ask me) | Up to 3 cards with photo, price, pros/cons, **stores compared**, a **90-day price chart** (AG Charts) |
+| **Activity tracker** | Like an order tracker: created → funded → friend requests → rule changes → approvals → payments → refunds → closed, then hollow "what's next" dots |
+| **Rules** | Change rules or amount (AI preview first; a lower amount refunds the difference) |
+| **Verified by PayPal** | Per-payment badges with PayPal's transaction id; **Verify now** button |
+| **Actions** | Run agent now · stop watching · sync · liquidate · move the end date |
 
-Payouts are matched by `sender_item_id` / `sender_batch_id`, which are the ledger entry id (Step 4). Events that are not PayPalVault's (unknown order, payout, or subscription) are stored and ignored.
+Also on the wallet home: **vault cards** (status pill + Timeline / Manage), **Money requests for you**, **Vault history**, your **live PayPal balance**, and **All activity**, a statement across every vault (AG Grid). Everything updates live over Socket.IO.
 
-To test without real traffic, use the dashboard's **Webhooks Simulator**. Its sample events have made-up ids, so they are stored and ignored; real sandbox payments (fund a vault, run an agent) fire the real events.
+## 1.9 Bryntum: calendar, timeline, board, plan
 
----
+Four **Bryntum Enterprise** products share one core on one page (`paypal-interface/bryntum/entry.js`, bundled by `scripts/build-bryntum.mjs`). **Dragging changes real things**, always after a password check in a Bryntum Popup:
 
-## 10. Expiry Sweeper and Auto-Liquidation (`apps/api/src/services/sweeper.ts`)
-
-Tool: the API's **1-minute background tick** (`scheduler.ts`), or a **Render Cron Job** running `apps/sweeper` (`* * * * *`, `npm run start -w apps/sweeper`). The cron script only calls `POST /api/jobs/tick` with `x-internal-key`, so the work stays in the API and its Socket.IO events reach the dashboard. Using the cron? Set `BACKGROUND_JOBS=off` on the API (running both is safe, just wasteful).
-
-Each tick:
-1. **Payouts:** re-send payouts that never got a batch id back (network error mid-call; safe, because the ledger entry id is the `PayPal-Request-Id`), then sync pending payouts (webhook backup).
-2. **Never funded** (`PENDING_FUNDING`, past expiry): open `FUND` entries → `FAILED`, vault → `EXPIRED`. A late approval is then never captured.
-3. **Expired with money** (`ACTIVE`, or `EXPIRED` after a failed refund): stop the shopping agent, then `startLiquidation()` → `payOutLiquidation()` to the vault owner's PayPal email, with a `LIQUIDATE` entry.
-   - A payment still in flight → `PENDING_SPENDS` → try again next tick.
-   - Zero balance → vault closed as `LIQUIDATED` straight away.
-   - Refund failed 3 times → left for a human (`POST /api/vaults/:id/liquidate`).
-   - `liquidation.auto_refund = false` → vault only marked `EXPIRED`.
-4. When the refund payout succeeds (webhook or sync), the vault becomes `LIQUIDATED`.
-5. **Watch mode:** run shopping agents whose `nextAgentRunAt` has come (Step 8).
-
-Zapier alerts for expiry and refunds are added in Step 12.
-
----
-
-## 11. Audit Search and Copilot (Elastic, `packages/audit`)
-
-Tools: **Elasticsearch Serverless** (Elastic Cloud, GCP `us-east4`) + `@elastic/elasticsearch` + **Claude** (Gemini backup) for the Copilot. Set `ELASTIC_URL` (the project's Elasticsearch endpoint) and `ELASTIC_API_KEY`. Without them the audit is off and everything else still works.
-
-1. **Index** `paypalvault-audit` (created when the API starts): one document per decision (`decision-<id>`) and per ledger entry (`ledger-<id>`). Fields: vault, merchant, amount, category, result, reasons, invoice, timestamp, plus a plain-English `summary` (e.g. *"Blocked payment of $48.00 to Audio Store … because the amount was above the per-purchase limit (MAX_LIMIT_EXCEEDED)"*). The summary is stored twice: `text` for keyword search and `semantic_text` (Elastic makes the embeddings with ELSER).
-2. **Writing:** the API sends every `decision:created` / `ledger:updated` event to Elastic in the background (`apps/api/src/services/audit.ts`). Payments never wait for it or fail because of it. `POST /api/audit/reindex` (`x-internal-key`) copies everything already in Postgres.
-3. **Anomaly check** (Policy Engine soft rule `UNUSUAL_SPEND`, score ≥ 0.8 → `NEEDS_HUMAN`): Elastic aggregates the vault's past approved spends (median amount, merchants, categories).
-   - 2× the median amount scores 0, 5× scores 1; a new merchant and a new category add 0.2 each.
-   - Fewer than 3 past spends → 0 (not enough history). Elastic off or slower than 2 s → no score, the payment continues.
-4. **Audit Copilot** (`POST /api/audit/ask {question, vaultId?}`): hybrid search (BM25 + semantic, merged with RRF) finds the top 8 records; the AI answers from those records only and cites their ids, e.g. *"blocked because the live price differed … [decision-cmvi…]"*. `GET /api/audit/search?q=&vaultId=` returns the records alone.
-
----
-
-## 12. Notifications (Zapier)
-
-Tool: **Zapier** → trigger **Webhooks by Zapier: Catch Hook** → actions **Slack: Send Channel Message** and **Gmail: Send Email**.
-
-The backend POSTs to `ZAPIER_HOOK_URL` on `BLOCK`, `NEEDS_HUMAN`, `LIQUIDATED`, and payout failures (`PAYOUT_FAILED`). Without the URL, alerts are off and everything else still works.
-
-- Body: `{ event, vault: {id, name, type, status}, amount, merchant, reasons, message, dashboard_link, timestamp }`. `message` is the same plain-English sentence as the audit log; `dashboard_link` uses `DASHBOARD_URL` (default `http://localhost:5173`).
-- Sent in the background from the API's event stream (`apps/api/src/services/notify.ts`), once per decision / ledger status. A human approving or rejecting sends no alert.
-- **Answer from the email (two-way):** the "approval needed" email has **Approve** / **Reject** buttons, and the "options ready" email (Ask me vaults) has **Pick 1/2/3** / **None of these**. Each button is a signed link (`INTERNAL_API_KEY`) for that one decision or option, valid 24 hours, and it opens a confirm page on the wallet site (`SITE_URL/email/act`); opening the link never acts by itself. Approve and Pick need the vault owner's password there and re-check the vault rules; Reject and None need none. A decision or option can only be answered once.
-
----
-
-## 13. Dashboard (`apps/web`)
-
-Tools: **React + Vite**, **AG Grid**, **Bryntum Scheduler**, **PayPal JS SDK**, **Socket.IO client**.
-
-| Screen / Component | Tool | Shows |
+| View | Product | Highlights |
 | :--- | :--- | :--- |
-| Deploy Vault form | React + Claude (via API) | Text box → generated policy JSON preview → Confirm |
-| Fund / Subscribe button | **PayPal JS SDK** (`@paypal/react-paypal-js`) | Sandbox checkout popup |
-| Vaults grid | **AG Grid** | Name, type, budget, balance bar, status, expiry countdown |
-| Live decision log | **AG Grid** (rows added through Socket.IO) | Approved/blocked rows colored green/red, reason codes |
-| Ledger grid | **AG Grid** | Every FUND / SPEND / LIQUIDATE with its PayPal reference |
-| Pending approvals | AG Grid + buttons | `NEEDS_HUMAN` items with Approve/Reject buttons |
-| Vault timeline | **Bryntum Scheduler** | Each vault as a bar from creation to expiry, with spend events marked |
-| Audit Copilot | Chat panel | Step 11 answers |
+| 🗓️ **Vault calendar** | **Calendar** | Day / Week / Month / Year views; one coloured calendar per vault with a sidebar; money in/out, purchases, approvals, blocks, friend requests, rule changes; faded future events. **Year heatmap** of money moved. **Drag** the next savings payment or *Vault ends* to reschedule them, with a **what-if pill** while dragging (*"+1 day · the agent keeps its budget until Nov 9"*). |
+| 📈 **Timeline** | **Scheduler** | Four lanes: **Vault · Money · AI agent · You**, stacked milestones, a "now" line. Drag *Ends*, the next payment or the agent's *Next check*. **▶ Replay** plays the vault's history back step by step with narration. **Run now** streams the agent's steps live onto its lane. |
+| 🗂️ **Board** | **TaskBoard** | One card per thing to buy: **Searching → Options ready → Needs you → Bought**. Cards move on their own; Pick / Approve / Reject from the card. |
+| 🧱 **Plan** | **Gantt** | Savings plan as chained payments (dependencies) → Goal → *Agent shops* → *Vault ends*. Drag the next payment and the later ones follow. |
 
-Run: `npm run api:dev` and `npm run web:dev`, then open `http://localhost:5173`.
+## 1.10 Answer from your inbox
 
-- One page: clicking a vault in the grid selects it (kept in `?vault=<id>`, so Zapier alert links open it). The selected-vault panel shows its rules, the PayPal button (`PENDING_FUNDING`), **Run agent** with its live tool calls, **Stop watching**, **Sync payouts**, and **Liquidate now**.
-- Live: the page reloads vaults, decisions and ledger on every Socket.IO event (`src/live.ts`); `agent:step` events stream in as the agent works.
-- Utility vaults can fund one-time (Orders) or by monthly subscription; the subscription only credits the vault when the `PAYMENT.SALE.COMPLETED` webhook arrives (needs a public URL, Step 15).
-- Config (root `.env`): `VITE_API_URL` (default `http://localhost:4000`) and `VITE_PAYPAL_CLIENT_ID` (falls back to `PAYPAL_CLIENT_ID`). Bryntum uses the free trial package (watermark) and loads only when the Timeline tab opens.
+Alerts go through **Zapier** (Webhooks by Zapier → Gmail / Slack) for blocked buys, approvals needed, options ready, refunds and payout failures.
+
+- The *approval needed* email has **Approve / Reject** buttons; *options ready* has **Pick 1 / 2 / 3 / None of these**.
+- Each button is a **signed link** (`INTERNAL_API_KEY`) for one decision, valid **24 h**, usable **once**.
+- Opening it **never acts by itself** (mail scanners open links). It shows a confirm page; **Approve and Pick need the owner's password** and re-check the rules.
+
+## 1.11 Verified by PayPal
+
+All vault money sits in one platform PayPal account; the split into vaults is our ledger. `apps/api/src/services/verify.ts` asks PayPal about **every ledger entry** (Orders, Payments, Payouts, Invoicing: read-only) and labels it:
+
+`✅ VERIFIED` · `⏳ WAITING` · `⚠️ MISMATCH` · `○ UNCHECKED`, with PayPal's transaction id.
+
+It runs nightly (`VERIFY_HOUR`) and from **Verify now**. A mismatch sends an alert. It never moves money and never changes the ledger.
+
+## 1.12 Audit Copilot (Elastic)
+
+- Every decision and payment is written to **Elasticsearch** (`paypalvault-audit`) with a plain-English summary, indexed twice: keyword (BM25) and **semantic** (ELSER).
+- **Anomaly score** feeds the `UNUSUAL_SPEND` rule: 2× the vault's median amount scores 0, 5× scores 1, and a new shop or new category adds 0.2. Fewer than 3 past spends means no score.
+- **Copilot** (`POST /api/audit/ask`): hybrid search (BM25 + semantic, RRF) finds the top records, then the AI answers **only from them, citing ids**: *"blocked because the live price differed … [decision-cmvi…]"*.
+- Elastic is optional: without it, everything else still works.
+
+## 1.13 Operations dashboard (React · `apps/web`)
+
+A one-page console for running the platform: **React + Vite**, **AG Grid**, **Bryntum Scheduler (React)**, **PayPal JS SDK**, **Socket.IO**. It talks to the API **only through the APIMatic SDK** (`pay-pal-vault-api`).
+
+| Panel | Tool | Shows |
+| :--- | :--- | :--- |
+| Deploy vault | AI via API | Plain English → policy preview → confirm |
+| Fund button | PayPal JS SDK | PayPal + Pay Later; monthly subscription for utility vaults |
+| Vaults grid | AG Grid | Name, type, budget, balance bar, status, expiry countdown |
+| Live decision log | AG Grid + Socket.IO | Green / red / amber rows with reason codes |
+| Pending approvals | AG Grid | `NEEDS_HUMAN` with Approve / Reject |
+| Vault timeline | Bryntum Scheduler | Each vault's life with its events |
+| Vault panel | – | Rules, run agent (live steps), stop, sync, liquidate, pick options |
+| Audit Copilot | Chat | Cited answers |
 
 ---
 
-## 14. Testing
+# 🏪 Part 2 · Business side: the seller dashboard
 
-| What | Tool |
+A **PayPal Business-style** home for the shops agents buy from (`/business`), built on **AG Grid Enterprise** and **AG Charts Enterprise**. Log in as `audiostore` / `12345678` or `cityutility` / `12345678`.
+
+## 2.1 The confidentiality rule
+
+> **A shop learns only what any PayPal payment tells it.**
+
+| ✅ A shop sees | ⛔ A shop never sees |
 | :--- | :--- |
-| Policy Engine rules (every reason code) | **node:test** unit tests (`npm test -w packages/policy`) |
-| PayPal sandbox calls (token, order, capture, payout, invoice) | **Postman** collection in `postman/`, with a sandbox environment |
-| PayPalVault API end-to-end (create → fund → spend → liquidate) | **Postman** collection runner |
-| Payment failures (declined capture, failed payout) | `PayPal-Mock-Response` header, e.g. `{"mock_application_codes":"INSTRUMENT_DECLINED"}` |
-| Webhook handling | PayPal Dashboard **Webhooks Simulator** + replaying the same event (should be ignored) |
-| Double spend | Fire 2 `spend` calls in parallel; only one should pass when the balance covers just one |
-| Money shown matches sandbox | Log in to `sandbox.paypal.com` as each account and compare balances with the ledger |
+| Payments it received, refunds, fees, withdrawals | A customer's rules, budget, limits or control mode |
+| The item that was bought | What the agent looked at, compared or decided **not** to buy |
+| An **anonymous buyer label** (`Customer 7F2A9C`) | Vault names, balances, owners, emails |
+| Whether the payment came from an AI agent | Blocked purchases, proposals, missed sales |
 
-**Unit tests:** `npm test -w packages/<policy|paypal|agents|audit|db>`. The `db` tests use the real database (`DATABASE_URL`): each makes a throwaway user and vaults, deletes them afterwards, and makes no PayPal calls. They cover double spend (2 and 10 parallel spends), funding / subscription payments / failed payouts arriving twice, and liquidation (waits for open spends, closes an empty vault). Every check ends with `reconcile()` (balance = ledger).
+- Buyer labels are an HMAC of the business + user id: the same buyer gets the same label at one shop, but labels **can't be linked across shops**.
+- *Bought together* only shows a product pair once **at least 2 different buyers** paid for both (counts only, never who).
+- The page never connects to the platform's live socket (which carries every customer's vault events; the server refuses it with `403`). It polls a **payments-only** fingerprint (`/biz/pulse`) instead.
+- Nothing on the business side talks to, slows, or influences any customer or agent.
 
-**Postman** (`postman/`): import both collections and the **PayPalVault sandbox** environment, then fill in the empty values from `.env` (`paypal_client_*`, `utility_client_*`, `merchant_email` = `AUDIO_STORE_SANDBOX_EMAIL`, `internal_key`).
+## 2.2 The PayPal Business home
 
-- **PayPalVault – PayPal sandbox:** token, order create/get, capture refused before approval, capture declined (`INSTRUMENT_DECLINED` mock), payout + status, same `sender_batch_id` refused, payout refused (`INSUFFICIENT_FUNDS` mock), utility invoices. Moves $1.01 platform → merchant.
-- **PayPalVault – API end-to-end** (API running): folder **1** creates a $20 vault and a funding order and prints the approve link → approve it as the **user** sandbox account → folder **2** captures, then tests over-limit / unknown merchant / price mismatch (BLOCK), unverified price and duplicate (NEEDS_HUMAN → rejected), a valid $5 payout, and liquidation ($15 back to the user).
-- From the command line: `npx newman run postman/<collection>.json -e postman/paypalvault-sandbox.postman_environment.json --env-var internal_key=...` (add `--folder "1. Create and fund"` for the end-to-end collection). Newman forgets variables between runs, so for folder 2 also pass `--env-var vault_id=... --env-var order_id=... --env-var merchant_category=...` from folder 1's output; the Postman app keeps them by itself.
-- Webhook tests (Simulator, replay) need a public API URL, so they run after the Render deploy (Step 15).
+Tabs: **Home · Activity · Get Paid · AI sales · Reports · Help**
+
+- **Live PayPal balance** of the business's own sandbox account, with refresh.
+- **Recent activity** and an **AI agent sales** teaser.
+- **Get Paid**: invoices, payment links, QR code, Checkout buttons (demo tiles), plus Seller Protection info.
+- A **morning briefing** pinned to the top of the grid: yesterday vs. the day before, and today so far.
+
+## 2.3 The AG Grid Enterprise transactions grid
+
+**Every transaction on the business's PayPal account** (sales, invoices, payouts received, refunds, fees, withdrawals), with **AI-agent payments recognised and tagged**.
+
+| AG Grid Enterprise feature | How it's used |
+| :--- | :--- |
+| **Row grouping + aggregation** | Drag a header to group by day, month, item, source, type, status, payer; sums with a pinned **grand total** |
+| **Pivot mode + tool panels** | Columns / Filters side panels; pivot by any dimension |
+| **Set filters** | On every category column; dates compare by calendar day |
+| **Master / detail** | ▸ opens a transaction's line items in a nested grid |
+| **Cell editing + undo / redo** | Your own bookkeeping: **Reconciled** ✓, **Tag** (rich select: Follow up, Wholesale, Gift, VIP, Disputed, Tax review), **Note** (large text editor), saved per business |
+| **Range selection + status bar** | Select cells → sum / avg / count |
+| **Integrated Charts** | **Chart presets** made from the grid's rows and **linked to them**: filter the grid, the chart follows |
+| **Cross-filter charts** | *Sales per day*, *Sales by source*, *Top items*: click a bar or slice and the grid, the KPIs and the other charts filter to it |
+| **Sparklines** | Payments per hour over the last 24 h, per product (Stampede watch) |
+| **Saved views** | Columns, grouping, pivot, filters and sort saved as named views |
+| **Excel export** | Real numbers with formats, not text |
+| **Source chips** | All · AI agents · Other PayPal · Money out |
+| **KPIs** | Follow every filter, chip, search and chart click |
+
+Columns: Time · Item · Gross · Fee · Net · Source · Type · Payer · Status · **PayPal check** · Reconciled · Tag · Note (+ hidden Day, Month, Sales, AI-agent sales, Other sales, Category, Storefront).
+
+## 2.4 Ask the grid in plain English
+
+Type *"refunds over $40 this week"*, *"AI agent sales by day"* or *"biggest payments from invoices"*. The AI (`business.ask`) returns **AG Grid settings** (column filters, sort, group-by, quick search) plus a one-line explanation, and the grid applies them.
+
+- Only the listed columns are allowed; unknown columns are dropped.
+- **Works without AI too:** when every model is out of quota, a built-in rule parser (`quickAsk`) understands amounts, date ranges (*today, last week, last 7 days*), refunds, fees, failed, pending, sources, grouping and sorting.
+
+## 2.5 Agent-era insights
+
+| Tab | What it does |
+| :--- | :--- |
+| ⚡ **Stampede watch** | Agents buy at machine speed, so a price typed wrong in the shop can sell out in minutes. This watches **payment speed per product** (default: 5 payments in 10 min = *Stampede*; a price below 60% of usual = *Price drop*) and **alerts the owner**. It never contacts, slows or blocks any agent. |
+| 🧺 **Bought together** | Product pairs paid for by the same (anonymous) buyer within 30 days: buyers, attach rate, median gap in days, revenue. Shown only with ≥ 2 different buyers. |
+| 🤖 **AI agent sales** | Agent payments tagged *AI agent (PayPalVault)*, matched to PayPal's own records by transaction id, then by amount within 15 minutes. Agent payments PayPal hasn't reported yet show at once from the ledger. |
+
+## 2.6 Accountant report and TV mode
+
+- 📒 **Accountant report**: a finance-only export as an **Excel workbook** (a *Transactions* sheet and a *Daily totals* sheet, styled headers, real number formats) or CSV. Totals count only what actually moved (failed / reversed rows count for nothing).
+- 📺 **TV mode**: a full-screen, dark, live view of payments as they arrive, for a shop's wall screen.
+
+## 2.7 Where the seller data comes from
+
+All read-only; nothing here moves money.
+
+| Data | First choice | Fallback |
+| :--- | :--- | :--- |
+| **Transactions** | PayPal **REST Transaction Search** (`/v1/reporting/transactions`) with the business's own REST app (*Transaction search* feature on) | Classic **NVP TransactionSearch** + `GetTransactionDetails` for item names (retried up to 3×) |
+| **Balance** | PayPal **REST Balances** API | NVP `GetBalance` → a hidden browser logging in to `sandbox.paypal.com` |
+| **AI-agent payments** | PayPalVault ledger (shown immediately) | – |
+| **Bookkeeping** (Reconciled / Tag / Note) | Saved per business in `paypal-interface/data/` | – |
+
+- Transactions are cached per business and re-synced in the background every 2 minutes (*Sync now* forces it). The first sync reads **180 days** in 31-day chunks; later syncs re-read the last 3 days for late arrivals.
+- If the agents' payments aren't in the connected account, the page says which PayPal account the agents pay, so the right credentials can be connected.
+- **50 sample transactions** per business (a live stampede, repeat buyers, refunds, a dispute hold, withdrawals) make every feature demo-able. They carry a *Sample* badge and `BIZ_SAMPLE_DATA=0` turns them off.
 
 ---
 
-## 15. Deploy (Render)
+## 💸 How money moves
+
+| Sandbox account | Type | Role |
+| :--- | :--- | :--- |
+| `paypalvault-platform@…` | Business | PayPalVault itself: holds all vault money, owns the REST app |
+| `kajla@…`, `jugal@…` | Personal | Vault owners: fund vaults, receive refunds, fund friends' vaults |
+| `audio-store@…` | Business | Shop for shopping vaults (BestBuy / Target / Walmart are stand-in shops paying into the same account) |
+| `city-utility@…` | Business | Utility that sends PayPal invoices (its own REST app) |
+
+```mermaid
+flowchart LR
+    U["👤 Owner<br/>(personal)"] -- "Orders v2 · Pay Later · saved PayPal" --> P["🏦 PayPalVault platform<br/>(business)"]
+    F["👥 Friend"] -- "Invoicing money request" --> P
+    U -- "Subscriptions (monthly top-up)" --> P
+    P -- "Checkout purchase (buyer protection)<br/>or Payouts" --> S["🏪 Shop<br/>(business)"]
+    P -- "Payouts (bills)" --> C["🧾 City Utility"]
+    P -- "Payouts (leftover refund)" --> U
+    L[("📒 Ledger<br/>(integer cents)")] -. "which money belongs to which vault" .- P
+```
+
+- A **vault** is a row with a budget, a balance and a policy; the real money sits in the platform account; the **ledger** tracks each vault's share.
+- Real store names map to sandbox merchant accounts through the `merchants` table, because real stores can't receive sandbox money.
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TB
+    subgraph Browser
+        W["👤 Wallet site<br/>paypal-interface :3000<br/>Bryntum · AG Grid · AG Charts"]
+        B["🏪 Business dashboard<br/>/business<br/>AG Grid + AG Charts Enterprise"]
+        D["🛠️ Ops console<br/>apps/web :5173<br/>React · AG Grid · Bryntum"]
+    end
+    subgraph Servers
+        S["Site server (Express)<br/>logins · /me/* · /biz/* · proxy"]
+        A["PayPalVault API (Express) :4000<br/>REST · webhooks · Socket.IO · 1-min tick"]
+    end
+    subgraph Core["packages/"]
+        PO["policy<br/>compiler (AI) + engine (code)"]
+        AG["agents<br/>shopping · bill-pay"]
+        PY["paypal<br/>service layer"]
+        AU["audit<br/>Elastic + Copilot"]
+        DB["db<br/>Prisma + ledger"]
+        SDK["vault-sdk · paypal-rest-sdk<br/>(APIMatic)"]
+    end
+    W --> S
+    B --> S
+    D -- "vault-sdk" --> A
+    S -- "vault-sdk" --> A
+    S -- "read-only" --> PPX["PayPal Transaction Search /<br/>Balances / NVP"]
+    A --> PO & PY & AU & DB
+    A -- "runs" --> AG
+    AG -- "vault-sdk (4 calls, none pays)" --> A
+    AG --> C3["Channel3"] & KE["Kernel"] & TK["PayPal Agent Toolkit (read)"]
+    PY --> PP["PayPal REST APIs"]
+    PP -- "webhooks" --> A
+    AU --> ES["Elasticsearch"]
+    A -- "alerts" --> Z["Zapier → Gmail / Slack"]
+    DB --> PG[("PostgreSQL")]
+```
+
+- **One door to PayPal:** only `packages/paypal` talks to PayPal's money APIs. The business side's read-only reporting calls are the only exception.
+- **One door to the money:** agents reach the API only through the SDK's four non-paying calls; every payment goes through the Policy Engine.
+- **One public URL:** the site server is the only thing exposed (e.g. a Cloudflare tunnel). It forwards just `/socket.io` and `/webhooks` to the API, which stays private.
+
+---
+
+## 🧰 Tech and sponsor tools
+
+| Tool | Where it's used |
+| :--- | :--- |
+| **PayPal Orders v2 + JS SDK** | Funding (PayPal button, Pay Later), Checkout purchases to shops |
+| **PayPal Vault (saved payment methods)** | Link PayPal once, *Pay now*, savings payments, the platform's Checkout payer |
+| **PayPal Payouts** | Paying shops (fallback), bills, leftover refunds |
+| **PayPal Subscriptions + Catalog Products** | Monthly utility top-up |
+| **PayPal Invoicing v2** | Utility bills, **Ask a friend** money requests |
+| **PayPal Webhooks** | Signature-verified fast path for captures, payouts, subscriptions, invoices |
+| **PayPal Transaction Search, Balances, NVP** | Seller dashboard (read-only) |
+| **PayPal Agent Toolkit** | Bill-pay agent reads invoices (read actions only) |
+| **PayPal Server SDK** (APIMatic-generated) | Typed Orders / Payments / Vault / Subscriptions calls |
+| **Claude** (`claude-sonnet-5-5`) + **Gemini** fallback · **Vercel AI SDK** · **Zod** | Policy compiler, agents, Audit Copilot, ask-the-grid |
+| **AG Grid Enterprise + AG Charts Enterprise** | Seller dashboard (see [2.3](#23-the-ag-grid-enterprise-transactions-grid)) |
+| **AG Grid + AG Charts Community** | Wallet *All activity* statement, 90-day price charts, ops console grids |
+| **Bryntum Enterprise** (Calendar, Scheduler, Gantt, TaskBoard; Scheduler React) | Vault calendar / timeline / board / plan (see [1.9](#19-bryntum-calendar-timeline-board-plan)), ops console timeline |
+| **APIMatic** | `pay-pal-vault-api` SDK from our OpenAPI 3.1 spec (used by the site, the agents and the ops console), `paypal-rest-sdk` from PayPal's published specs (Payouts, Invoicing, Webhooks), private docs portal |
+| **Channel3** | Product search, store comparison, 90-day price history, product lookup from a link |
+| **Kernel** | Cloud browser that reads the live price on the product page |
+| **Elasticsearch** (Elastic Cloud, ELSER) | Audit log, hybrid search, anomaly score, Copilot retrieval |
+| **Zapier** | Alert emails / Slack with signed Approve / Reject / Pick buttons |
+| **PostgreSQL + Prisma** | Vaults, policies, ledger, decisions, proposals, fund requests |
+| **Socket.IO** | Live updates (vaults, decisions, ledger, agent steps) |
+| **Render** | Hosting: API, site, Postgres, cron sweeper |
+| **Postman / Newman** | PayPal sandbox and end-to-end API collections |
+
+---
+
+## 🚀 Getting started
+
+### Prerequisites
+
+- **Node.js 20+** and npm
+- **PostgreSQL** (local or Render)
+- A **PayPal Developer** account with sandbox accounts and apps (below)
+- An **Anthropic** and/or **Google Gemini** API key
+- Optional: Channel3, Kernel, Elastic, Zapier, AG Grid and Bryntum licence keys
+
+### 1. PayPal sandbox setup
+
+1. **Sandbox accounts** (developer.paypal.com → Testing Tools): the platform (business), one or two personal owners with a big balance, `audio-store` and `city-utility` (business).
+2. **Platform app** (Apps & Credentials, linked to the platform): turn on **Payouts, Subscriptions, Invoicing, Save payment methods**.
+3. **City Utility app**: used to send invoices.
+4. **Business dashboard (optional):** a REST app per business with **Transaction search** on (`AUDIO_STORE_CLIENT_ID` / `_SECRET`), or that account's NVP API credentials.
+
+### 2. Install, configure, migrate
+
+```bash
+git clone https://github.com/kajlaM/PayPal-Wallet.git && cd PayPal-Wallet
+npm install
+cp .env.example .env            # fill it in (see Configuration below)
+npm run db:deploy               # apply the Prisma migrations
+npm run db:seed                 # demo user + the merchant registry
+```
+
+### 3. One-time PayPal setup
+
+```bash
+npm run setup:plan -w @paypalvault/paypal          # monthly top-up plan → PAYPAL_UTILITY_PLAN_ID
+npm run setup:checkout -w apps/api                 # save the platform's PayPal for Checkout purchases
+npm run setup:webhooks -w packages/paypal -- https://<public-url>   # → PAYPAL_WEBHOOK_ID, UTILITY_WEBHOOK_ID
+```
+
+### 4. Run it
+
+```bash
+npm run up                # API + site + Cloudflare link (prints https://<name>.trycloudflare.com)
+npm run up -- --local     # same, without the tunnel
+```
+
+Or part by part:
+
+```bash
+npm run api:dev           # PayPalVault API      http://localhost:4000
+npm run site:dev          # wallet + business    http://localhost:3000   (business: /business)
+npm run web:dev           # ops console          http://localhost:5173
+```
+
+### 5. Log in
+
+| Side | Username | Password |
+| :--- | :--- | :--- |
+| 👤 Personal | `kajla` · `jugal` (or their sandbox email) | `1234` |
+| 🏪 Business | `audiostore` · `cityutility` (or their sandbox email) | `12345678` |
+
+> A personal user links their PayPal once (a popup on `sandbox.paypal.com`), after which *Pay now* and savings work without another PayPal login.
+
+---
+
+## ⚙️ Configuration (`.env`)
+
+<details>
+<summary><b>PayPal</b></summary>
+
+| Variable | Purpose |
+| :--- | :--- |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | Platform REST app |
+| `PAYPAL_BASE_URL` | `https://api-m.sandbox.paypal.com` |
+| `PAYPAL_WEBHOOK_ID` / `UTILITY_WEBHOOK_ID` | From `setup:webhooks` |
+| `PAYPAL_UTILITY_PLAN_ID` | From `setup:plan` |
+| `UTILITY_CLIENT_ID` / `UTILITY_CLIENT_SECRET` | City Utility app (invoices) |
+| `PLATFORM_SANDBOX_EMAIL`, `USER_SANDBOX_EMAIL`, `AUDIO_STORE_SANDBOX_EMAIL`, `CITY_UTILITY_SANDBOX_EMAIL` | Sandbox accounts (the seed uses the merchant emails) |
+| `MERCHANT_PAYMENTS` | `payouts` = always pay shops with Payouts instead of Checkout |
+
+</details>
+
+<details>
+<summary><b>AI and sponsor tools</b></summary>
+
+| Variable | Purpose |
+| :--- | :--- |
+| `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` | Claude (first choice) |
+| `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_MODEL` | Gemini fallback (comma-separated list, tried in order) |
+| `CHANNEL3_API_KEY` | Product data (empty = demo store) |
+| `DEMO_STORE` | `on` = also search the demo store when a Channel3 key is set |
+| `KERNEL_API_KEY` | Live-price browser (empty = plain fetch) |
+| `ELASTIC_URL`, `ELASTIC_API_KEY` | Audit log + Copilot (empty = off) |
+| `ZAPIER_HOOK_URL`, `ALERT_RECIPIENTS`, `ALERT_CC`, `ALERT_TIMEZONE` | Alert emails |
+| `AG_GRID_LICENSE_KEY` | AG Grid Enterprise (empty = trial watermark) |
+| `BRYNTUM_LICENSE_KEY` | Bryntum Enterprise (empty = trial mode) |
+
+</details>
+
+<details>
+<summary><b>Business dashboard</b></summary>
+
+| Variable | Purpose |
+| :--- | :--- |
+| `<PREFIX>_CLIENT_ID` / `_CLIENT_SECRET` | The business's REST app (Transaction search + Balances), e.g. `AUDIO_STORE_*`, `CITY_UTILITY_*` or `UTILITY_*` |
+| `<PREFIX>_API_USERNAME` / `_API_PASSWORD` / `_API_SIGNATURE` | NVP fallback (TransactionSearch, GetBalance) |
+| `<PREFIX>_SANDBOX_PASSWORD` | Last-resort balance read through a hidden browser |
+| `BIZ_SAMPLE_DATA` | `0` turns the 50 sample transactions off |
+
+</details>
+
+<details>
+<summary><b>Servers and infrastructure</b></summary>
+
+| Variable | Purpose |
+| :--- | :--- |
+| `DATABASE_URL` | PostgreSQL |
+| `PORT` / `INTERFACE_PORT` | API (4000) / site (3000) |
+| `INTERNAL_API_KEY` | Internal routes (`x-internal-key`) and email-link signatures. Never leaves the servers |
+| `PAYPALVAULT_API_URL` | Where the site, agents and sweeper reach the API |
+| `SITE_URL` | Public site address (email buttons, "Open the vault" links) |
+| `DASHBOARD_URL` | Ops console address in alerts |
+| `VITE_API_URL`, `VITE_PAYPAL_CLIENT_ID` | Ops console build settings |
+| `BACKGROUND_JOBS` | `off` = no 1-minute tick in the API (use the `apps/sweeper` cron) |
+| `VERIFY_HOUR` | Hour of the nightly *Verified by PayPal* run |
+
+</details>
+
+---
+
+## 🔌 API reference
+
+The PayPalVault API (`apps/api`, port 4000) is described in **OpenAPI 3.1** (`apps/api/openapi/paypalvault.openapi.json`), built from the same Zod schemas the routes validate with; a test checks it matches the live routes. 🔒 = internal key only (the site, the agent and the background jobs).
+
+<details>
+<summary><b>Vaults</b></summary>
+
+| Method | Route | What it does |
+| :--- | :--- | :--- |
+| GET | `/api/vaults` | All vaults with totals, Channel3 savings, PayPal check summary |
+| GET | `/api/vaults/details` | Every vault of one customer, with full details |
+| GET | `/api/vaults/{id}` | One vault: ledger, decisions, rule history, proposals, savings plan |
+| POST | `/api/vaults/compile` | Plain English → rules (preview only) |
+| POST | `/api/vaults` | Create a vault from reviewed rules |
+| POST | `/api/vaults/{id}/policy` | Change rules or amount (new version; a lower amount refunds the difference) |
+| POST | `/api/vaults/{id}/expiry` | Move the end date |
+| POST | `/api/vaults/{id}/liquidate` | Close and refund the rest (Payouts) |
+| POST | `/api/vaults/{id}/sync` | Ask PayPal again about pending payments |
+| POST | `/api/vaults/{id}/verify` | Check every payment against PayPal's records |
+
+</details>
+
+<details>
+<summary><b>Funding</b></summary>
+
+| Method | Route | What it does |
+| :--- | :--- | :--- |
+| POST | `/api/vaults/{id}/fund/order` · `/fund/capture` | PayPal button order, then capture |
+| POST | `/api/vaults/{id}/fund/recorded` 🔒 | Record a payment taken from the owner's saved PayPal |
+| POST | `/api/vaults/{id}/fund/requests` · `/sync` · `/{requestId}/cancel` | Ask a friend (PayPal money request) |
+| GET / POST | `/api/fund-requests` · `/api/fund-requests/{id}/sync` | The friend's side |
+| POST | `/api/vaults/{id}/subscribe` · `/subscribe/confirm` | Monthly top-up subscription |
+| POST | `/api/vaults/{id}/savings/charge` 🔒 · `/next` · `/pause` · `/resume` | Savings plan |
+
+</details>
+
+<details>
+<summary><b>Purchases and agents</b></summary>
+
+| Method | Route | What it does |
+| :--- | :--- | :--- |
+| POST | `/api/vaults/{id}/spend` 🔒 | The agent **asks** to buy; the Policy Engine decides |
+| POST | `/api/vaults/{id}/decisions/{decisionId}/approve` · `/reject` | Owner approves (rules re-checked) or rejects |
+| POST | `/api/vaults/{id}/proposals` 🔒 | Agent proposes up to 3 options |
+| POST | `/api/vaults/{id}/proposals/{proposalId}/choose` · `/reject` | Owner picks one, or none |
+| POST | `/api/vaults/{id}/agent` · `/agent/stop` · `/agent/next` | Run now, stop watching, move the next check |
+| POST | `/api/products/lookup` | Product link → product, stores, 90-day price (Channel3) |
+
+</details>
+
+<details>
+<summary><b>Audit, system, webhooks</b></summary>
+
+| Method | Route | What it does |
+| :--- | :--- | :--- |
+| GET | `/api/audit/search` | Search the audit log (keyword + meaning) |
+| POST | `/api/audit/ask` | Audit Copilot |
+| POST | `/api/audit/reindex` 🔒 | Rewrite everything into the audit log |
+| GET | `/api/merchants` · `/api/ledger` · `/api/decisions` · `/health` | Data and health |
+| POST | `/api/jobs/tick` 🔒 | Run the background jobs once (for a cron) |
+| POST | `/webhooks/paypal` · `/webhooks/paypal/utility` | PayPal webhooks (signature-verified) |
+
+</details>
+
+<details>
+<summary><b>Business dashboard (site server, business login)</b></summary>
+
+| Method | Route | What it does |
+| :--- | :--- | :--- |
+| GET | `/biz/me` | Business name, sandbox email, storefronts |
+| GET | `/biz/balance` | Live PayPal balance (`?fresh=1` skips the 30 s cache) |
+| GET | `/biz/transactions` | Every transaction + AI-agent payments + connection status |
+| POST | `/biz/sync` | Read new transactions from PayPal now |
+| GET | `/biz/pulse` | Payments-only change fingerprint (polled) |
+| GET | `/biz/together` | Bought-together pairs (counts only) |
+| POST | `/biz/notes` | Save Reconciled / Tag / Note |
+| POST | `/biz/ask` | Plain English → grid filters / sort / grouping |
+
+</details>
+
+### SDKs (APIMatic)
+
+```bash
+npx @apimatic/cli@2.2.0 auth login     # once
+npm run apimatic -- sdk                # spec → packages/vault-sdk (pay-pal-vault-api)
+npm run apimatic -- paypal-sdk         # PayPal Payouts + Invoicing + Webhooks → packages/paypal-rest-sdk
+npm run apimatic -- portal | serve     # private docs portal (local only)
+```
+
+> Spec tip: write nullable fields as `type: [X, 'null']` and give routes that return a list or `null` an explicit `response`. APIMatic drops the `null` from `anyOf: [$ref, null]`, and the SDK then rejects real responses.
+
+---
+
+## 🗄️ Data model
+
+| Table | Holds |
+| :--- | :--- |
+| `users` | Vault owners (PayPal email) |
+| `vaults` | Name, type (`SHOPPING` / `UTILITY` / `SAVINGS`), budget, balance, status (`PENDING_FUNDING` / `SAVING` / `ACTIVE` / `EXPIRED` / `LIQUIDATED`), expiry, savings plan, agent watch times |
+| `policies` | Versioned policy JSON + the plain-English text it came from |
+| `ledger_entries` | `FUND` / `SPEND` / `LIQUIDATE`, `PENDING` / `COMPLETED` / `FAILED`, cents, PayPal refs, `paidVia` (Checkout / Payouts), PayPal check result |
+| `decisions` | Every Policy Engine result with the request and all reasons |
+| `proposals` | *Ask me* option sets (with Channel3 data) |
+| `merchants` | Registered shops, category, website, sandbox payout email |
+| `fund_requests` | *Ask a friend* PayPal money requests |
+| `paypal_links` | Saved PayPal accounts (owners and the platform) |
+| `paypal_events` | Every webhook, stored once by event id |
+
+**Ledger rules:** money is **integer cents**; a balance changes only through ledger entries, inside a transaction that locks the vault row (`SELECT … FOR UPDATE`), so two simultaneous purchases can't both spend the same dollars.
+
+---
+
+## 🔐 Safety guarantees
+
+| Guarantee | How |
+| :--- | :--- |
+| An agent can't move money | It has 4 SDK calls, none of which pays; every purchase passes the Policy Engine |
+| The AI can't approve itself | The engine is deterministic code; the AI only writes rules and proposals |
+| No double spending | Row lock on the vault + held (`PENDING`) entries; tested with 10 parallel purchases |
+| No double payment | Ledger id = `PayPal-Request-Id` / payout item id / invoice id; retries reuse it |
+| Prices can't be faked | Merchant, amount and verified price come from data (Channel3, Kernel), never from the AI |
+| Spending needs the owner | Password for every money action; email links are signed, single-use and expire in 24 h |
+| Webhooks can't be forged | Signature check with PayPal; each event processed once |
+| Shops learn nothing private | Anonymous per-shop buyer labels; payments-only data; no platform socket |
+| The ledger matches PayPal | Nightly read-only *Verified by PayPal* check; mismatches alert |
+| Money always comes home | The expiry sweeper refunds leftovers; failed refunds retry, then wait for a human |
+
+---
+
+## 🧪 Testing
+
+```bash
+npm run typecheck                       # every workspace
+npm test -w @paypalvault/policy         # 32: every rule and reason code, no LLM
+npm test -w @paypalvault/agents         # 20: ranking, Channel3 matching, options, verification
+npm test -w @paypalvault/db             # 15: double spend, duplicate webhooks, liquidation (real DB)
+npm test -w @paypalvault/api            # 12: emails, approval links, OpenAPI ⇄ routes
+npm test -w @paypalvault/audit          #  4
+npm test -w @paypalvault/paypal         #  2
+```
+
+**85 unit tests.** Every `db` test ends with `reconcile()` (balance = ledger).
+
+| Also tested with | What |
+| :--- | :--- |
+| **Postman / Newman** (`postman/`) | PayPal sandbox calls, declined captures and refused payouts (`PayPal-Mock-Response`), and the full API flow: create → fund → BLOCK cases → NEEDS_HUMAN → pay → liquidate |
+| **Live end-to-end** | The ops console's SDK client against the real API: AI-compiled policy → vault → PayPal order → funded from a linked PayPal → agent → approval → payout to the shop → sync → liquidation refund, plus every error path |
+| **Webhook replay** | PayPal Webhooks Simulator, and the same event twice (ignored) |
+| **Reconciliation** | *Verified by PayPal* against sandbox records |
+
+---
+
+## ☁️ Deploying to Render
 
 | Service | Render type | Notes |
 | :--- | :--- | :--- |
-| `apps/api` | Web Service | Public URL used as PayPal webhook URL |
-| `apps/web` | Static Site | Set `VITE_API_URL` and `VITE_PAYPAL_CLIENT_ID` |
-| `apps/sweeper` | Cron Job (`* * * * *`) | Only `PAYPALVAULT_API_URL` (the API's Render URL) and `INTERNAL_API_KEY` (optional: the API already runs the tick itself) |
-| Database | Render Postgres | Run `prisma migrate deploy` on build |
+| `paypal-interface` | Web Service | The public site (wallet + business). Set `SITE_URL`, `PAYPALVAULT_API_URL` |
+| `apps/api` | Private Service / Web Service | Runs the tick unless `BACKGROUND_JOBS=off` |
+| `apps/sweeper` | Cron Job (`* * * * *`) | `npm run start -w apps/sweeper`; needs `PAYPALVAULT_API_URL`, `INTERNAL_API_KEY` |
+| `apps/web` | Static Site | `VITE_API_URL`, `VITE_PAYPAL_CLIENT_ID` |
+| Database | Render Postgres | `npm run db:deploy` on build |
 
-After deploying, update the webhook URL in the PayPal app to the Render API URL.
-
----
-
-## 16. Demo Run (matches the pitch)
-
-1. **Deploy Vault:** type *"Create a vault with $50 to buy noise-canceling headphones before Sunday, max spend $45."* → the policy JSON appears → Confirm → pay with the PayPal sandbox button → vault is ACTIVE.
-2. **Guardrail test:** the agent tries a $48 item → `MAX_LIMIT_EXCEEDED` → red row in AG Grid + Slack alert.
-3. **Valid purchase:** Channel3 finds a $39.99 item → Kernel verifies the price → payout to `audio-store` → green row, balance $10.01.
-4. **Bill pay:** `city-utility` sends an invoice → the bill-pay agent pays it → invoice marked paid.
-5. **Liquidation:** expire the vault (or click Liquidate) → $10.01 is paid out back to `user` → status LIQUIDATED, Bryntum bar closes.
-6. **Proof:** open `sandbox.paypal.com` as `user` and show the refund.
-7. **Copilot:** ask *"Why was the first purchase blocked?"*
+After deploying, re-run `setup:webhooks` with the public URL (`https://<site>/webhooks/paypal`).
 
 ---
 
-## 17. Team Split (3 Members)
+## 🎬 Demo script
 
-Do this **together first**: agree on the DB schema (Step 3.3), the `SpendRequest` / policy JSON shapes (Steps 6–7), and the API routes (Step 5). After that, each person can work alone.
-
-### Member 1: Payments & Backend
-- Step 2: PayPal sandbox accounts, apps, features, webhooks
-- Step 3: repo, Prisma schema, ledger logic, row locking
-- Step 4: PayPal service layer, APIMatic SDK generation
-- Step 5: vault lifecycle API (fund, subscribe, spend, liquidate)
-- Step 9: webhooks
-- Step 10: expiry sweeper
-- Step 15: Render deployment
-
-### Member 2: AI & Agents
-- Step 6: Policy Compiler (Claude + Zod)
-- Step 7: Policy Engine + node:test tests
-- Step 8: shopping agent (Channel3, Kernel) and bill-pay agent (PayPal Agent Toolkit, invoices)
-- Step 8.3: policy wrapper for toolkit tools
-- Step 11: Elastic index, anomaly check, Audit Copilot
-
-### Member 3: Frontend, Integrations & Demo
-- Step 13: React dashboard, AG Grid grids, Bryntum timeline, PayPal JS SDK buttons, Socket.IO live feed
-- Step 12: Zapier alerts
-- Step 14: Postman collections, negative testing, end-to-end checks
-- Step 16: demo script, video, and Devpost submission
-
-**Handoffs:**
-- Member 1 gives Member 2 the `/spend` route and Member 3 the GET routes plus socket events.
-- Member 2 gives Member 1 the `evaluate(request)` function and Member 3 the `/api/vaults` compile response.
-- Member 3 reports bugs found during testing to whoever owns that step.
+1. **Personal: describe it.** *"Buy noise-cancelling headphones before Sunday, $50, max $45 each, ask me first."* → rules → fund with PayPal.
+2. **Guardrail:** the agent finds a $48 pair → `MAX_LIMIT_EXCEEDED`, a red row, an alert email.
+3. **Smart buying:** Channel3 shows the same model cheaper at another approved store, and a price far above its 90-day normal makes the agent **wait**.
+4. **Ask me:** three options arrive by email → **Pick 2** → password → paid with PayPal Checkout → ✅ *Verified by PayPal*.
+5. **Bryntum:** drag the vault's end on the calendar (what-if pill) and **Replay** the timeline.
+6. **Copilot:** *"Why was the first purchase blocked?"* → a cited answer.
+7. **Liquidation:** end the vault → leftovers return to the owner's PayPal.
+8. **Business:** log in as Audio Store → the AI-agent sale appears with an anonymous buyer → *"AI agent sales by day"* in plain English → **Stampede watch** → an Excel accountant report.
 
 ---
 
-## 18. Changes on 4 Nov 2026
+## 📁 Project layout
 
-New ways to fund a vault, buyer-protected purchases, and answering approvals from email. Everything else works as before.
-
-### Funding a vault (three options, PayPal only, no cards or Venmo)
-- **Pay with PayPal:** unchanged. The amount is taken from the customer's saved PayPal account.
-- **PayPal Pay Later (new):** the PayPal JS SDK Pay Later button. The vault gets the full amount at once and the customer pays PayPal back in 4 payments (Pay in 4: US accounts, $30 to $1,500). Uses the same Orders API order and capture as normal funding.
-- **Ask a friend on PayPal (new):** the platform account sends a PayPal money request (Invoicing API) to the friend's PayPal email. When the friend pays, the money goes straight into the vault, not the owner's account.
-  - New table `fund_requests` (migration `20261103120000_fund_requests`).
-  - New files: `packages/paypal/src/requests.ts`, `apps/api/src/services/fund-requests.ts`, `apps/api/src/routes/fund-requests.ts`.
-  - New routes: `POST /api/vaults/:id/fund/requests` (send), `/fund/requests/sync` (check), `/fund/requests/:requestId/cancel`, plus `GET /api/fund-requests?payerEmail=` and `POST /api/fund-requests/:id/sync` for the friend's side.
-  - Payment is picked up by the `INVOICING.INVOICE.PAID` webhook (now also registered on the platform app), the background tick, or "Check now".
-  - Requests still open when a vault expires are cancelled by the sweeper. `/fund/order` refuses while a friend request is open, so a vault can't be funded twice.
-  - `addFunding()` in `packages/db/src/ledger.ts` takes an optional ledger note ("Paid by … (PayPal money request)").
-  - Leftover money still goes back to the vault owner when the vault closes.
-
-### Vault purchases paid with PayPal Checkout (new)
-- The vault still pays by itself. Now the platform pays the shop with a **PayPal Checkout purchase** (Orders API, shop = payee, paid from the platform's saved PayPal) instead of a Payout. This gives buyer protection, a receipt, item details for the shop, and a normal refund button.
-- One-time setup: `npm run setup:checkout -w apps/api`. Log in as `PLATFORM_SANDBOX_EMAIL` and approve. The account is saved in `paypal_links`.
-- **Falls back to Payouts** if the platform account isn't saved yet, or PayPal clearly refuses (nothing was paid). `MERCHANT_PAYMENTS=payouts` in `.env` always uses Payouts. Utility bills always use Payouts.
-- **Never pays twice:** the ledger entry is marked `CHECKOUT` before PayPal is called, and an unclear result is only retried as the same order (ledger entry id = PayPal-Request-Id and invoice id).
-- New column `ledger_entries.paidVia` (`CHECKOUT` / `PAYOUTS`, migration `20261103130000_checkout_spends`).
-- New files: `packages/paypal/src/checkout.ts`, `apps/api/src/services/checkout.ts`, `apps/api/scripts/setup-checkout.ts`.
-- Changed: `spend.ts` (Checkout first), `payouts.ts` (skips Checkout entries), `sweeper.ts` (resumes and settles Checkout purchases), `webhooks.ts` (`PAYMENT.CAPTURE.COMPLETED` / `DENIED` for purchases), `POST /api/vaults/:id/sync`, and `packages/agents/src/paypalvault.ts` (reads either payment status).
-
-### Answer from the email (two-way Zapier alerts, email only)
-- The "approval needed" email has **Approve / Reject** buttons. The "options ready" email (Ask me vaults) has **Pick 1/2/3 / None of these**.
-- Each button is a signed link (`INTERNAL_API_KEY`) for one decision or option. It expires after 24 hours, can only be answered once, and opens a confirm page on the wallet site (`SITE_URL/email/act`).
-- Opening the link never acts by itself (mail apps and scanners open links on their own). **Approve and Pick need the owner's password** and re-check the vault rules. Reject and None need no password.
-- New: `packages/policy/src/approval-links.ts` (+ tests). Changed: `emails.ts` (action buttons, + test), `notify.ts` (signs the links). No Zap changes needed.
-
-### Wallet site (`paypal-interface/`)
-- Create-vault review step: a **"How do you want to fund it?"** picker (Pay with PayPal / PayPal Pay Later / Ask a friend), with friend email suggestions.
-- A vault waiting for its money shows **"Fund this vault"** with the same three options, or **"Waiting for your friend"** (open PayPal request, copy link, check now, cancel).
-- **"Money requests for you"** box: shows the requests friends sent you, with "Pay with PayPal" and "I've paid".
-- Activity shows who funded the vault, and a **🛡 PayPal Checkout** badge on purchases paid that way.
-- New server routes: `/config`, `/me/vaults/:id/fund/{paypal,order,capture,friend}`, `/me/vaults/:id/fund/requests/...`, `/me/requests`, `/me/requests/:id/check`, and `GET/POST /email/act` (email confirm page).
-
-### Dashboard (`apps/web`)
-- The fund button shows **PayPal + Pay Later** only (cards and Venmo turned off).
-
-### Setup and config
-- Migrations applied: `npm run db:deploy` (`fund_requests`, `checkout_spends`).
-- `.env.example`: notes for `SITE_URL` (also used by the email buttons) and the new `MERCHANT_PAYMENTS`.
-- Re-run `npm run setup:webhooks -w packages/paypal -- https://<tunnel>` so the platform app also receives invoice events.
-- Typecheck passes. Unit tests pass: policy 32, api 10, agents 14, audit 4, paypal 2.
+```text
+PayPal-Wallet/
+├── apps/
+│   ├── api/                 Express API: routes, webhooks, Socket.IO, background tick, OpenAPI
+│   ├── web/                 Ops console: React + Vite, AG Grid, Bryntum Scheduler, PayPal JS SDK
+│   └── sweeper/             Cron job: one background tick, then exit
+├── packages/
+│   ├── policy/              Policy schema, AI compiler, deterministic engine, shopping lists, savings
+│   ├── agents/              Shopping + bill-pay agents, ranking, Channel3, Kernel, Agent Toolkit
+│   ├── paypal/              The only PayPal money layer (Orders, Checkout, Payouts, Vault, Invoicing, …)
+│   ├── audit/               Elastic audit log, anomaly score, Copilot
+│   ├── db/                  Prisma schema, migrations, ledger (row locks)
+│   ├── vault-sdk/           APIMatic SDK for the PayPalVault API (pay-pal-vault-api)
+│   └── paypal-rest-sdk/     APIMatic SDK from PayPal's published specs
+├── paypal-interface/        Wallet site + business dashboard (Express + vanilla JS)
+│   ├── index.html · app.js            👤 personal wallet (Bryntum, AG Grid, AG Charts)
+│   ├── business.html · business.js    🏪 seller dashboard (AG Grid + AG Charts Enterprise)
+│   ├── business*.ts                   seller data: transactions, balance, notes, samples
+│   └── server.ts                      logins, /me/*, /biz/*, proxy to the API
+├── apimatic/                API specs + APIMatic build inputs (portal output not committed)
+├── postman/                 Postman collections + sandbox environment
+└── scripts/                 up (whole stack), Bryntum bundle, APIMatic
+```
 
 ---
 
-## 19. Changes on 5 Nov 2026
+<div align="center">
 
-All changes are in the wallet site (`paypal-interface/`) unless a path says otherwise. The site now uses four Bryntum products: Calendar, Scheduler, Gantt and TaskBoard.
+**PayPalVault**: *AI that shops with rules, money that moves only through PayPal.*
 
-### Create a vault (simpler first screen)
-- **Buy / Save** sliding switch at the top.
-  - **Buy:** Amount, Description, an **Ask me** switch, and a **Pay** row with three tiles: **Pay now**, **Pay later** (PayPal Pay in 4) and **Ask a friend** (the friend's email and message appear on the same screen).
-  - **Save:** the same fields, plus `$__ every day / week / month` (paid in over time from your own PayPal).
-- **Ask me** is an iPhone-style switch in PayPal blue. On, the AI shows its top 3 options and you pick one. Off, it runs on autopilot. It replaces the old 3-option question; the "ask above $X" setting is kept when changing an older vault, unless the switch is flipped.
-- The payment choice moved from the review step to this screen. The PayPal balance check now only runs when the money comes from your own PayPal, and the friend's email is checked here.
-- Less text: no subtitles, no hints under Amount or Description, and the Continue button just spins.
-- Review step: no subtitle, and no "Pay" or "Rules written by" rows. The yellow box only shows **real problems** (shop removed as unknown, item limits over the budget, a limit lowered, list cut to 10 items, end date shortened, a savings payment that covers everything). Notes about defaults the AI filled in are hidden.
-- **Pay later needs no site password:** PayPal's own window is the one sign-in. Pay Later can't be charged from the saved PayPal account the way Pay now is, because PayPal requires the buyer to approve it each time. No money moves until PayPal approves it. `server.ts` skips the password only for `funding: PAYLATER`.
+Thanks to **PayPal**, **AG Grid**, **Bryntum**, **APIMatic**, **Channel3**, **Kernel**, **Elastic** and **Render** for the developer tools and sandbox infrastructure.
 
-### Vault page (Manage)
-- **"AI agent"** is renamed **"Agent logs"**: a status line with a pulsing dot, and a clean log box (time, coloured dot, text: blue bought, gold needs you, red blocked).
-- **Ask me switch** (same as on the create screen) replaces "how much the AI does on its own". It sits above Agent logs, and flipping it asks for the password, with Save / Cancel.
-- **Activity** is now a tracker like an online order's status: dots joined by a line, oldest first. It covers vault created, money added, friend requests, rule changes, approvals, picks, blocked or rejected buys, payments to shops, refunds and closed/expired, followed by hollow "what's next" dots. More than 7 events fold into "Show N more events".
-
-### Vault cards
-- The type icon (shield) is removed; each card starts with its status pill.
-- Clicking the card does nothing. Only the buttons work: **Timeline** opens the timeline, **Manage** opens the vault page.
-- The status text has its own line, with Timeline and Manage below it in the same place on every card.
-- The section header shows **"✓ Connected"** instead of "✓ PayPal connected".
-
-### Bryntum: Vault calendar (Calendar)
-- A **Calendar** button next to Create opens a full-screen calendar in an Apple Calendar style with PayPal colours.
-  - **Views:** Day / Week / Month / Year.
-  - **Sidebar:** each vault is its own coloured calendar you can tick on and off, plus search.
-- **Events for every vault:** the vault's life as an all-day bar, money in and out, purchases, approvals needed, blocked buys (grouped per day), friend requests, rule changes and closed/expired. Upcoming events are faded: future savings payments, the agent's next check, and the vault's end.
-- **Drag to reschedule:** the next savings payment and "Vault ends" can be dragged (dashed outline). The drop asks for the password in a Bryntum Popup and is saved on the server; Cancel or an error snaps it back. Nothing can be deleted.
-- **What-if while dragging:** a pill by the cursor says what the drop would do, e.g. "+1 day · the agent keeps its budget until Nov 9", or in red "last payment is after the vault ends".
-- **Year view heatmap:** days are shaded by how much money moved, with a Less→More legend. Hovering a day shows "+$490 in · −$85.30 out".
-
-### Bryntum: Vault view (Timeline · Board · Plan)
-- A **Timeline** button on each vault card opens a full-screen view for that vault. A side panel shows the details of anything you click.
-- **Timeline** (Scheduler):
-  - Four lanes: **Vault** (life bar, end), **Money**, **AI agent** (buys, blocks, options, last run, next check, live steps) and **You** (approvals, picks, rule changes, friend requests).
-  - Moments are labelled milestones that stack instead of overlapping. A thin blue "now" line, hover tooltips, and live updates.
-  - Drag "Ends", the next savings payment or the agent's "Next check" (the last needs no password), with the same what-if text.
-  - **▶ Replay:** zooms to what happened and plays it back step by step with a moving marker and narration. **■ Stop** ends it. Nothing changes; it only re-shows history.
-  - **Run now:** starts the agent and follows it live. Steps land on the AI agent lane as they happen, and a toast says when the run ends.
-- **Board** (TaskBoard, shopping vaults):
-  - One card per thing to buy, in columns **Searching → Options ready → Needs you → Bought**. Cards move on their own as the agent works.
-  - Click a card to **Pick** one of the options, or **Approve / Reject** a purchase (password via the Bryntum Popup).
-- **Plan** (Gantt, savings vaults): payments chained with dependencies, leading to the Goal, then "Agent shops" for shopping vaults, then "Vault ends". Drag the next payment and the later ones follow, then save with the password.
-
-### Bryntum setup (thin packages)
-- Four products on one page need Bryntum's **thin** packages, which share one core. Installed with npm aliases, all at 7.3.7: `@bryntum/{core,engine,grid,scheduler,schedulerpro,calendar,gantt,taskboard}-thin`. The full `@bryntum/calendar-trial` package was removed.
-- `paypal-interface/bryntum/entry.js` and `entry.css` list what the site uses. `scripts/build-bryntum.mjs` bundles them with esbuild into `paypal-interface/vendor/bryntum.{js,css}` + fonts, exposed as `window.Bryntum`.
-- `npm run build:bryntum` builds the bundle. The site server also builds it on start when it's missing, and serves it at `/vendor/`. The page loads it only when a calendar or vault view opens. `paypal-interface/vendor/` is in `.gitignore`.
-- These are **trial** builds, so a "Bryntum Trial Version" watermark shows. A licence removes it.
-- `apps/web` still uses its own `@bryntum/scheduler` (a separate app, not affected).
-
-### New API routes
-| Route (site → PayPalVault API) | What it does | Password |
-| :--- | :--- | :--- |
-| `POST /me/vaults/:id/expiry` → `/api/vaults/:id/expiry` | Moves the vault's end. Saved as a new policy version with only the end date changed; money and pending approvals are untouched. At least 1 h from now, at most 90 days (2 years for savings), and after the last savings payment. | Yes |
-| `POST /me/vaults/:id/savings/next` → `/api/vaults/:id/savings/next` | Moves the next savings payment. The later payments keep their interval and must all fall before the vault ends (`rescheduleSavings` in `apps/api/src/services/savings.ts`). | Yes |
-| `POST /me/vaults/:id/agent/next` → `/api/vaults/:id/agent/next` | Moves the agent's next check. The vault must be active, the agent must be watching it, and the time must be before the vault ends. | No (moves no money) |
-
-- `POST /me/vaults` now refuses a request without a proper policy (`400 INVALID_POLICY`). Before, it gave a server error that exposed an internal path.
-
-### Checked
-- Typecheck passes. Unit tests pass: api 10, agents 14, audit 4, db 15, paypal 2, policy 32 (77 in total).
-- **New API routes:** every refusal case returns the right error: wrong password, dates in the past or too far ahead, closed vaults, savings payments past the vault's end, the agent not watching, unknown vault.
-- **Browser smoke test:** 20 checks passing with no page errors, across the create screen, the vault page, the calendar (all views) and the timeline on every vault.
-- **Browser, per feature:** Replay, a live agent run (45 s, 3 live steps), Board with options, Plan, the heatmap, the what-if text, and the card buttons.
-
-### Still to do before submitting (Devpost rules)
-- Add an open-source **LICENSE** file to the repo (required).
-- Make sure the GitHub repo is **public**.
-- **Demo video** under 3 minutes on YouTube.
-- **Hosted demo URL** or complete setup steps, with test logins for judges.
-- Deadline: **Nov 12, 2026, 12:00 pm Pacific.**
-
----
-
-## Verified by PayPal (read-only reconciliation)
-
-All vault money sits in one PayPal account; the split into vaults is our ledger. `apps/api/src/services/verify.ts`
-asks PayPal about every ledger entry (Orders, Payments, Payouts, Invoicing; read-only) and labels it
-`VERIFIED`, `WAITING`, `MISMATCH` or `UNCHECKED`, with PayPal's transaction id. It runs every night
-(`VERIFY_HOUR`, default 3 AM in `ALERT_TIMEZONE`) and from the **Verify now** button
-(`POST /api/vaults/:id/verify`). Badges show on vault cards, the vault's activity, the activity table and the
-seller dashboard; a mismatch sends an alert email. It never moves money and never changes the ledger.
-
-## API description and APIMatic (private)
-
-- `npm run openapi -w @paypalvault/api` writes the OpenAPI 3.1 description of the PayPalVault API
-  (`apps/api/openapi/paypalvault.openapi.json`), built from the same zod schemas the routes validate with
-  (`apps/api/src/api-schemas.ts`). A test checks it lists exactly the routes the API serves and marks exactly the
-  routes that need the internal key.
-- PayPal's own SDK calls (Orders, Payments, Vault, Subscriptions) go through the APIMatic-generated
-  PayPal Server SDK (`packages/paypal/src/sdk.ts`); its errors come out as `PayPalApiError` like the REST client's.
-- APIMatic (needs `npx @apimatic/cli@2.2.0 auth login` once): `npm run apimatic -- sdk | portal | serve | paypal-sdk`.
-  - `packages/vault-sdk` (`pay-pal-vault-api`): the PayPalVault SDK. The site (`paypal-interface/vault-api.ts`) and the agent
-    (`packages/agents/src/paypalvault.ts`) call the API only through it. The agent's file exposes just four calls
-    (read a vault, list shops, ask to buy, propose options): it has no call that pays, approves, refunds or closes.
-  - `packages/paypal-rest-sdk` (`invoices`): generated from PayPal's own published descriptions (`apimatic/paypal/original`).
-    Payouts, invoice/money-request reads and webhook management go through it (`packages/paypal/src/rest-sdk.ts`).
-    Invoice and money-request writes stay on the REST client because they must send `PayPal-Request-Id`, which PayPal's
-    Invoicing description lacks; the webhook signature check stays there because it must send PayPal's bytes verbatim.
-  - The SDKs' models are camelCase; requests and responses are converted with the SDKs' own schemas, so the JSON on the
-    wire is unchanged (checked on every stored vault, policy, purchase request and payout batch).
-  - The portal is static files on this machine (`apimatic/vault/portal`, not committed); nothing is published, and its
-    "open in an AI assistant" page actions are off.
+</div>

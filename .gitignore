@@ -8,3 +8,16 @@ paypal-interface/vendor/
 
 # APIMatic outputs (private docs portal, generated builds)
 apimatic/vault/portal/
+
+# Secrets: only .env.example (no values) is ever committed
+.env
+.env.*
+!.env.example
+_env*
+*.pem
+*.key
+
+# Logs, OS and editor junk
+*.log
+.DS_Store
+.impeccable/
