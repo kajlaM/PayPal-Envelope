@@ -19,6 +19,10 @@ import {
   type ApiVaultsPolicyRequest,
 } from "../models/api-vaults-policy-request.js";
 import { apiVaultsRequestSchema, type ApiVaultsRequest } from "../models/api-vaults-request.js";
+import {
+  apiVaultsSyncResponseSchema,
+  type ApiVaultsSyncResponse,
+} from "../models/api-vaults-sync-response.js";
 import { errorSchema, type Error } from "../models/error.js";
 import { vaultDetailsSchema, type VaultDetails } from "../models/vault-details.js";
 import { vaultSummarySchema, type VaultSummary } from "../models/vault-summary.js";
@@ -320,7 +324,7 @@ export class Vaults {
   syncVault(
     request: Vaults.SyncVaultRequest,
     options?: RequestOptions,
-  ): ApiPromise<Record<string, unknown>, Vaults.SyncVaultError> {
+  ): ApiPromise<ApiVaultsSyncResponse[], Vaults.SyncVaultError> {
     return this.#rawClient.execute(
       {
         method: "POST",
@@ -332,7 +336,7 @@ export class Vaults {
         body: { kind: "empty" },
       },
       {
-        success: { kind: "json", schema: s.record(s.string(), s.unknown()) },
+        success: { kind: "json", schema: s.array(s.lazy(() => apiVaultsSyncResponseSchema)) },
         errorFactory: Vaults.SyncVaultError,
       },
       options,

@@ -81,7 +81,11 @@ const OPS: Op[] = [
   { method: 'post', path: '/api/vaults/{id}/policy', id: 'changePolicy', tag: 'Vaults', summary: 'Change an active vault\'s rules or amount (a new version; lower amount refunds the difference)', body: S.ChangePolicyBody },
   { method: 'post', path: '/api/vaults/{id}/expiry', id: 'changeExpiry', tag: 'Vaults', summary: 'Move the vault\'s end date', body: S.ExpiryBody },
   { method: 'post', path: '/api/vaults/{id}/liquidate', id: 'liquidateVault', tag: 'Vaults', summary: 'Close the vault and refund what is left to the owner\'s PayPal (Payouts)' },
-  { method: 'post', path: '/api/vaults/{id}/sync', id: 'syncVault', tag: 'Vaults', summary: 'Ask PayPal again about pending payments of this vault' },
+  {
+    method: 'post', path: '/api/vaults/{id}/sync', id: 'syncVault', tag: 'Vaults', summary: 'Ask PayPal again about pending payments of this vault',
+    // A list: one entry per payout PayPal was asked about (empty when nothing was pending).
+    response: { type: 'array', items: { type: 'object', properties: { entryId: { type: 'string' }, status: { type: 'string' } } } },
+  },
 
   // ----- Funding (money into a vault, always from PayPal) -----
   { method: 'post', path: '/api/vaults/{id}/fund/order', id: 'createFundingOrder', tag: 'Funding', summary: 'PayPal order for the PayPal button (the owner approves it on PayPal)' },
@@ -91,7 +95,7 @@ const OPS: Op[] = [
   { method: 'post', path: '/api/vaults/{id}/fund/requests/sync', id: 'syncFundRequests', tag: 'Funding', summary: 'Ask PayPal whether the friend paid' },
   { method: 'post', path: '/api/vaults/{id}/fund/requests/{requestId}/cancel', id: 'cancelFundRequest', tag: 'Funding', summary: 'Cancel an open money request' },
   { method: 'get', path: '/api/fund-requests', id: 'listFundRequests', tag: 'Funding', summary: 'Money requests sent to one PayPal email', query: z.object({ payerEmail: z.string(), status: z.enum(['OPEN', 'PAID', 'CANCELLED']).optional() }), response: { type: 'array', items: ref('Object') } },
-  { method: 'post', path: '/api/fund-requests/{id}/sync', id: 'syncFundRequest', tag: 'Funding', summary: 'Ask PayPal about one money request' },
+  { method: 'post', path: '/api/fund-requests/{id}/sync', id: 'syncFundRequest', tag: 'Funding', summary: 'Ask PayPal about one money request', response: { type: ['object', 'null'], additionalProperties: true, description: 'The money request, or null when PayPal no longer knows its invoice' } },
   { method: 'post', path: '/api/vaults/{id}/subscribe', id: 'createSubscription', tag: 'Funding', summary: 'Utility vault: monthly PayPal subscription that tops it up' },
   { method: 'post', path: '/api/vaults/{id}/subscribe/confirm', id: 'confirmSubscription', tag: 'Funding', summary: 'Confirm the approved subscription', body: S.SubscriptionIdBody },
 
@@ -161,7 +165,11 @@ const components = {
         id: { type: 'string' }, vaultId: { type: 'string' },
         type: { type: 'string', enum: ['FUND', 'SPEND', 'LIQUIDATE'] }, status: { type: 'string', enum: ['PENDING', 'COMPLETED', 'FAILED'] },
         amountCents: { type: 'integer', minimum: 0 }, paypalRef: { type: ['string', 'null'] }, paidVia: { type: ['string', 'null'] },
-        paypalCheck: { anyOf: [ref('PayPalCheck'), { type: 'null' }] }, paypalCheckedAt: { type: ['string', 'null'], format: 'date-time' },
+        // Null until the payment is first checked against PayPal (every new payment). Written as a nullable
+        // enum, not anyOf [PayPalCheck, null]: APIMatic drops the null from that form, and its SDK then
+        // rejects every vault that has an unchecked payment.
+        paypalCheck: { type: ['string', 'null'], enum: ['VERIFIED', 'WAITING', 'MISMATCH', 'UNCHECKED', null], description: 'Last read-only check against PayPal\'s records; null = not checked yet' },
+        paypalCheckedAt: { type: ['string', 'null'], format: 'date-time' },
         paypalTxnId: { type: ['string', 'null'] }, paypalCheckNote: { type: ['string', 'null'] }, createdAt: { type: 'string', format: 'date-time' },
       },
     },
@@ -198,7 +206,12 @@ const components = {
         },
       }],
     },
-    SpendResult: { type: 'object', additionalProperties: true, properties: { decision: ref('Decision'), ledgerEntry: { anyOf: [ref('LedgerEntry'), { type: 'null' }] } } },
+    // ledgerEntry is null when nothing was paid (blocked, or waiting for the owner). A nullable object, not
+    // anyOf [LedgerEntry, null], which APIMatic turns into a non-nullable union.
+    SpendResult: {
+      type: 'object', additionalProperties: true,
+      properties: { decision: ref('Decision'), ledgerEntry: { type: ['object', 'null'], additionalProperties: true, description: 'The LedgerEntry of the payment, or null when nothing was paid' } },
+    },
     VaultVerification: {
       type: 'object',
       properties: {

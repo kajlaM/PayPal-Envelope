@@ -1301,7 +1301,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Object"
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "entryId": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -1979,7 +1990,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Object"
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true,
+                  "description": "The money request, or null when PayPal no longer knows its invoice"
                 }
               }
             }
@@ -4515,14 +4531,18 @@
             ]
           },
           "paypalCheck": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PayPalCheck"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "VERIFIED",
+              "WAITING",
+              "MISMATCH",
+              "UNCHECKED",
+              null
+            ],
+            "description": "Last read-only check against PayPal's records; null = not checked yet"
           },
           "paypalCheckedAt": {
             "type": [
@@ -5200,14 +5220,12 @@
             "$ref": "#/components/schemas/Decision"
           },
           "ledgerEntry": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LedgerEntry"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "The LedgerEntry of the payment, or null when nothing was paid"
           }
         }
       },

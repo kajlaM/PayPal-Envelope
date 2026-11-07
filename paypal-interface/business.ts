@@ -1,26 +1,33 @@
 // Seller side of agentic commerce: what a shop sees of the AI agents that buy from it.
-// Read-only views over data PayPalVault already keeps (ledger, decisions, proposals, policies):
-//   orders()  - every purchase an agent made from this business, with why the agent was allowed to buy
-//   missed()  - every time an agent wanted to buy here but did not, and why (the sale the shop lost)
-//   ask()     - plain English -> AG Grid filters / sort / grouping (our AI; AG Grid's AI Toolkit is Enterprise)
-// Privacy: customers are anonymised per business ("Customer 7F2"); vault names, balances and owners
-// never leave this file.
+//
+// CONFIDENTIALITY RULE: a business only knows the payments it received, exactly as with any PayPal
+// payment. It never learns what a customer wanted, their budget, their limits, their rules, what their
+// agent looked at, or what it decided not to buy. Nothing here reads policies, blocked decisions or
+// proposals, and nothing here talks to (or influences) any customer or shopping agent.
+//
+//   transactions() - every transaction on the business's PayPal account (business-transactions.ts), with
+//                    the AI-agent payments recognised and tagged; agent buyers stay anonymous
+//   orders()   - the AI-agent payments from PayPalVault's ledger (shown at once, before PayPal reports them)
+//   together() - product pairs paid for by the same buyer (counts only, never who)
+//   pulse()    - a fingerprint of this business's payments, so the page knows when to refresh
+//   ask()      - plain English -> AG Grid filters / sort / grouping over the business's own payments
+// Buyers are anonymised per business ("Customer 7F2A9C"); vault names, balances and owners never leave this file.
 
 import { createHmac } from 'node:crypto';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { prisma } from '@paypalvault/db';
 import { policyModels } from '@paypalvault/policy';
-import { c3, priceHistory, priceVerdict } from '@paypalvault/agents';
 import type { BusinessAccount } from './accounts.ts';
+import { connection, paypalTransactions, transactionsVersion, type PayPalTxn } from './business-transactions.ts';
+import { sampleTransactions } from './business-samples.ts';
+import { notesOf } from './business-notes.ts';
 
 const SECRET = process.env.INTERNAL_API_KEY?.trim() ?? '';
-const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const toCents = (value: unknown) => Math.round(Number(value ?? 0) * 100);
 
 /** Same customer -> same label for one business, but not linkable across businesses. */
 function customerLabel(biz: BusinessAccount, userId: string) {
-  return `Customer ${createHmac('sha256', SECRET).update(`${biz.username}:${userId}`).digest('hex').slice(0, 3).toUpperCase()}`;
+  return `Customer ${createHmac('sha256', SECRET).update(`${biz.username}:${userId}`).digest('hex').slice(0, 6).toUpperCase()}`;
 }
 
 /**
@@ -31,358 +38,277 @@ function customerLabel(biz: BusinessAccount, userId: string) {
 export async function storefronts(biz: BusinessAccount) {
   return prisma.merchant.findMany({
     where: { name: { equals: biz.name, mode: 'insensitive' } },
-    select: { id: true, name: true, category: true },
+    select: { id: true, name: true, category: true, sandboxEmail: true },
   });
-}
-
-type Rules = {
-  max_single_transaction?: number;
-  allowed_categories?: string[];
-  approved_merchants?: string[];
-  control_mode?: string;
-  human_approval_above?: number;
-  max_transactions_per_day?: number;
-};
-
-/** The vault's rules as they were at `at` (the newest policy version created before it). */
-function rulesAt(policies: { createdAt: Date; policyJson: unknown }[], at: Date): Rules {
-  let found: unknown = policies[0]?.policyJson;
-  for (const p of policies) if (p.createdAt <= at) found = p.policyJson;
-  return ((found as { rules?: Rules } | undefined)?.rules ?? {}) as Rules;
-}
-
-async function policiesFor(vaultIds: string[]) {
-  const rows = await prisma.policy.findMany({
-    where: { vaultId: { in: [...new Set(vaultIds)] } },
-    orderBy: { version: 'asc' },
-    select: { vaultId: true, createdAt: true, policyJson: true },
-  });
-  const byVault = new Map<string, typeof rows>();
-  for (const row of rows) (byVault.get(row.vaultId) ?? byVault.set(row.vaultId, []).get(row.vaultId)!).push(row);
-  return byVault;
 }
 
 /** Bill payments only say "bill": name them after the bill's category, e.g. "Electricity bill". */
 const productName = (text: unknown, category: unknown) => {
   const name = String(text ?? '').trim();
-  if (!name || /^(bill|bill payment)$/i.test(name)) return category ? `${category} bill` : 'Bill payment';
+  if (!name) return 'Payment'; // no description on the request: say nothing more than PayPal would
+  if (/^(bill|bill payment)$/i.test(name)) return category ? `${category} bill` : 'Bill payment';
   return name;
 };
 
 const PAID_VIA: Record<string, string> = { CHECKOUT: 'PayPal Checkout', PAYOUTS: 'PayPal Payouts' };
-const STATUS: Record<string, string> = { COMPLETED: 'Paid', PENDING: 'Pending', FAILED: 'Failed' };
+const STATUS: Record<string, string> = { COMPLETED: 'Completed', PENDING: 'Pending', FAILED: 'Failed' };
 
-// ---------- Orders: purchases agents made from this business ----------
+// ---------- Orders: payments this business received ----------
 
 export async function orders(biz: BusinessAccount) {
+  return (await agentPayments(biz)).map(({ refs: _refs, ...row }) => row);
+}
+
+/** AI-agent payments from the ledger, with every id PayPal may know them by (for matching, server-only). */
+async function agentPayments(biz: BusinessAccount) {
   const shops = await storefronts(biz);
   const entries = await prisma.ledgerEntry.findMany({
     where: { type: 'SPEND', merchantId: { in: shops.map((s) => s.id) } },
     orderBy: { createdAt: 'desc' },
-    include: {
+    select: {
+      id: true, createdAt: true, amountCents: true, status: true, paidVia: true, note: true,
+      paypalRef: true, paypalTxnId: true, paypalCheck: true, paypalCheckNote: true,
       merchant: { select: { name: true } },
-      decision: { select: { requestJson: true, resolvedBy: true, createdAt: true } },
-      vault: { select: { userId: true, type: true } },
+      vault: { select: { userId: true } },
+      // Only the item that was bought (what any shop sees on an order), never the customer's rules or reasons.
+      decision: { select: { requestJson: true } },
     },
   });
-  const policies = await policiesFor(entries.map((e) => e.vaultId));
 
   return entries.map((e) => {
-    const req = (e.decision?.requestJson ?? {}) as Record<string, any>;
-    const rules = rulesAt(policies.get(e.vaultId) ?? [], e.decision?.createdAt ?? e.createdAt);
-    const shop = e.merchant?.name ?? '';
-    const checks: string[] = [];
-    if (rules.max_single_transaction !== undefined) {
-      checks.push(`${dollars(e.amountCents)} is within the customer's ${dollars(toCents(rules.max_single_transaction))} per-payment limit`);
-    }
-    if (req.category && rules.allowed_categories?.length) {
-      checks.push(`${req.category} is an allowed category (${rules.allowed_categories.join(', ')})`);
-    }
-    if (rules.approved_merchants?.length) checks.push(`${shop} is on the customer's allowed shops`);
-    if (rules.max_transactions_per_day !== undefined) checks.push(`Under ${rules.max_transactions_per_day} purchases a day`);
-    if (req.invoice_id) checks.push(`Matched open PayPal invoice ${req.invoice_id} for the same amount`);
-
-    const verified = req.verified_price !== undefined && req.verified_price !== null;
-    const price = verified
-      ? `Live price checked at checkout: ${dollars(toCents(req.verified_price))}`
-      : e.vault.type === 'UTILITY' ? 'Amount taken from the bill' : 'Live price was not checked';
-
-    const resolved = e.decision?.resolvedBy;
-    const mode = rules.control_mode;
-    const approval =
-      resolved === 'CHOSEN_BY_OWNER' ? 'Customer picked this one from the options the agent found'
-      : resolved === 'APPROVED_BY_HUMAN' ? 'Customer approved it (it needed a human OK first)'
-      : mode === 'ASK_ABOVE' && rules.human_approval_above !== undefined ? `Below the customer's ask-me amount (${dollars(toCents(rules.human_approval_above))}), so the agent bought it on its own`
-      : 'Autopilot: within all the customer\'s rules, no approval needed';
-
+    const req = (e.decision?.requestJson ?? {}) as Record<string, unknown>;
+    const category = typeof req.category === 'string' ? req.category : '';
+    // The item comes from the payment request's description: the item title (shopping agent) or
+    // "Pay invoice …" (bill pay), the same text PayPal shows the business in the payout note. The ledger
+    // note is internal: a failed payout overwrites it with the error ("Payout FAILED: …"), so it is only
+    // a fallback for entries that did not fail.
+    const described = typeof req.reason === 'string' ? req.reason : '';
+    const fallback = e.status === 'FAILED' ? '' : e.note;
     return {
       id: e.id,
       at: e.createdAt.toISOString(),
-      product: productName(e.note || req.reason, req.category),
-      category: req.category ?? '',
-      storefront: shop,
+      product: productName((described || fallback || '').slice(0, 120), category),
+      category,
+      storefront: e.merchant?.name ?? '',
       amount: e.amountCents / 100,
       paidVia: PAID_VIA[e.paidVia ?? ''] ?? 'PayPal Payouts',
       status: STATUS[e.status] ?? e.status,
       customer: customerLabel(biz, e.vault.userId),
-      approval: resolved === 'CHOSEN_BY_OWNER' ? 'Picked by customer' : resolved === 'APPROVED_BY_HUMAN' ? 'Approved by customer' : 'Autopilot',
       paypalRef: e.paypalTxnId ?? e.paypalRef ?? '',
       // "Verified by PayPal": the last read-only check of this payment against PayPal's own records.
       paypal: e.paypalCheck === 'VERIFIED' ? 'Confirmed' : e.paypalCheck === 'MISMATCH' ? 'Differs' : e.paypalCheck === 'WAITING' ? 'Processing' : 'Not checked',
       paypalNote: e.paypalCheck === 'VERIFIED' ? 'Confirmed in your PayPal account' : e.paypalCheckNote ?? 'Not checked against PayPal yet',
-      why: { checks, price, approval },
+      refs: [e.id, e.paypalRef, e.paypalTxnId].filter((r): r is string => Boolean(r)),
     };
   });
 }
 
-// ---------- Missed sales: agents wanted to buy here, but did not ----------
+// ---------- All transactions: the business's PayPal account + AI-agent payments recognised in it ----------
 
-type Missed = { group: string; detail: string };
+const SOURCE_AGENT = 'AI agent (PayPalVault)';
+const MATCH_WINDOW_MS = 15 * 60_000;
+const DISPLAY_STATUS: Record<PayPalTxn['status'], string> = { Completed: 'Completed', Pending: 'Pending', Reversed: 'Reversed', Denied: 'Failed', Other: 'Pending' };
 
-/** Plain-words reason for one blocked/declined attempt, with the numbers the shop can act on. */
-function explain(code: string, req: Record<string, any>, rules: Rules, shop: string): Missed {
-  const amount = toCents(req.amount);
-  const limit = rules.max_single_transaction !== undefined ? toCents(rules.max_single_transaction) : null;
-  switch (code) {
-    case 'MAX_LIMIT_EXCEEDED':
-    case 'ITEM_LIMIT_EXCEEDED':
-      return { group: 'Over the customer\'s price limit', detail: limit !== null ? `Priced ${dollars(amount)}, customer allows up to ${dollars(limit)}` : `Priced ${dollars(amount)}, above the customer's limit` };
-    case 'ABOVE_HUMAN_APPROVAL_THRESHOLD':
-      return { group: 'Over the customer\'s price limit', detail: `Priced ${dollars(amount)}, above the amount the customer lets the agent spend alone` };
-    case 'PRICE_MISMATCH':
-      return { group: 'Price changed at checkout', detail: req.verified_price != null ? `Listed ${dollars(amount)}, live checkout price ${dollars(toCents(req.verified_price))}` : 'The checkout price differed from the listing' };
-    case 'PRICE_NOT_VERIFIED':
-      return { group: 'Price could not be checked', detail: 'The agent could not confirm the live price on your product page' };
-    case 'INSUFFICIENT_VAULT_BALANCE':
-    case 'VAULT_INACTIVE':
-    case 'VAULT_EXPIRED':
-    case 'STILL_SAVING':
-      return { group: 'Customer\'s budget ran out', detail: `The customer's budget could not cover ${dollars(amount)}` };
-    case 'MERCHANT_NOT_APPROVED':
-    case 'MERCHANT_NOT_REGISTERED':
-      return { group: 'Shop not on the customer\'s list', detail: `${shop} is not one of the shops the customer allows` };
-    case 'CATEGORY_NOT_ALLOWED':
-      return { group: 'Category not allowed', detail: `${req.category ?? 'This category'} is not in the customer's categories${rules.allowed_categories?.length ? ` (${rules.allowed_categories.join(', ')})` : ''}` };
-    case 'DAILY_LIMIT_REACHED':
-      return { group: 'Customer\'s daily limit reached', detail: 'The customer had already bought the maximum for that day' };
-    case 'POSSIBLE_DUPLICATE':
-      return { group: 'Looked like a repeat order', detail: 'Same shop and amount within 10 minutes, so the customer was asked first' };
-    case 'POLICY_CHANGED':
-      return { group: 'Customer changed their rules', detail: 'The customer edited their rules while the agent was checking out' };
-    case 'REJECTED_BY_HUMAN':
-      return { group: 'Customer said no', detail: 'The agent asked, and the customer declined' };
-    case 'NOT_PICKED':
-      return { group: 'Customer picked another option', detail: 'Shown to the customer as an option, they chose a different one' };
-    case 'ALL_REJECTED':
-      return { group: 'Customer said no', detail: 'Shown to the customer as an option, they rejected all options' };
-    case 'SYSTEM_ERROR':
-      return { group: 'Payment error', detail: 'Something failed while paying; nothing was charged' };
-    default:
-      if (code.startsWith('INVOICE_')) {
-        const text: Record<string, string> = {
-          INVOICE_REQUIRED: 'The agent had no bill to match the payment to',
-          INVOICE_NOT_FOUND: 'The bill could not be found on PayPal',
-          INVOICE_NOT_OPEN: 'The bill was already paid or closed',
-          INVOICE_MISMATCH: 'The amount differed from your bill',
-          INVOICE_MERCHANT_MISMATCH: 'The bill was issued by another company',
-        };
-        return { group: 'Bill did not match', detail: text[code] ?? 'Bill problem' };
-      }
-      return { group: 'Other', detail: code.toLowerCase().replace(/_/g, ' ') };
+export async function transactions(biz: BusinessAccount) {
+  const [agent, paypal] = await Promise.all([agentPayments(biz), paypalTransactions(biz)]);
+  const conn = await connection(biz);
+
+  // 1. Match PayPal transactions to agent payments: by id (capture id, payout transaction, our custom id),
+  //    then by same amount within 15 minutes for payouts PayPal reports under another id.
+  const byRef = new Map<string, (typeof agent)[number]>();
+  for (const a of agent) for (const r of a.refs) byRef.set(r, a);
+  const matched = new Map<string, (typeof agent)[number]>(); // paypal txn id -> agent payment
+  const used = new Set<string>();
+  for (const t of paypal) {
+    const a = [t.id, t.reference, t.custom].map((r) => r && byRef.get(r)).find(Boolean);
+    if (a && !used.has(a.id)) { matched.set(t.id, a); used.add(a.id); }
   }
-}
-
-/** Which reasons matter most when a payment was blocked for several at once. */
-const REASON_ORDER = ['MERCHANT_NOT_APPROVED', 'CATEGORY_NOT_ALLOWED', 'MAX_LIMIT_EXCEEDED', 'ITEM_LIMIT_EXCEEDED', 'PRICE_MISMATCH', 'INSUFFICIENT_VAULT_BALANCE'];
-const mainReason = (codes: string[]) => [...codes].sort((a, b) => (REASON_ORDER.indexOf(a) + 1 || 99) - (REASON_ORDER.indexOf(b) + 1 || 99))[0] ?? 'OTHER';
-
-export async function missed(biz: BusinessAccount) {
-  const shops = await storefronts(biz);
-  const names = new Map(shops.map((s) => [s.name.toLowerCase(), s.name]));
-  const ours = (merchant: unknown) => names.get(String(merchant ?? '').toLowerCase());
-
-  const decisions = await prisma.decision.findMany({
-    where: { OR: [{ result: 'BLOCK' }, { result: 'NEEDS_HUMAN', resolvedBy: 'REJECTED_BY_HUMAN' }] },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true, vaultId: true, requestJson: true, reasons: true, resolvedBy: true, createdAt: true, vault: { select: { userId: true } } },
-  });
-  const proposals = await prisma.proposal.findMany({
-    where: { status: { in: ['CHOSEN', 'REJECTED'] } },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true, vaultId: true, options: true, status: true, chosenIndex: true, createdAt: true, resolvedAt: true, vault: { select: { userId: true } } },
-  });
-
-  type Row = { id: string; vaultId: string; userId: string; at: Date; req: Record<string, any>; code: string; codes: string[] };
-  const raw: Row[] = [];
-  for (const d of decisions) {
-    const req = (d.requestJson ?? {}) as Record<string, any>;
-    if (!ours(req.merchant)) continue;
-    const code = d.resolvedBy === 'REJECTED_BY_HUMAN' ? 'REJECTED_BY_HUMAN' : mainReason(d.reasons);
-    raw.push({ id: d.id, vaultId: d.vaultId, userId: d.vault.userId, at: d.createdAt, req, code, codes: d.reasons });
+  for (const t of paypal) {
+    if (matched.has(t.id) || t.kind !== 'sale') continue;
+    const near = agent
+      .filter((a) => !used.has(a.id) && Math.round(a.amount * 100) === Math.round(t.gross * 100) && Math.abs(Date.parse(a.at) - Date.parse(t.at)) <= MATCH_WINDOW_MS)
+      .sort((x, y) => Math.abs(Date.parse(x.at) - Date.parse(t.at)) - Math.abs(Date.parse(y.at) - Date.parse(t.at)))[0];
+    if (near) { matched.set(t.id, near); used.add(near.id); }
   }
-  for (const p of proposals) {
-    const options = (Array.isArray(p.options) ? p.options : []) as Record<string, any>[];
-    options.forEach((o, i) => {
-      if (!ours(o.merchant) || (p.status === 'CHOSEN' && i === p.chosenIndex)) return;
-      raw.push({
-        id: `${p.id}:${i}`, vaultId: p.vaultId, userId: p.vault.userId, at: p.resolvedAt ?? p.createdAt,
-        req: { amount: o.price, reason: o.title, category: o.category, merchant: o.merchant, channel3: o.channel3 },
-        code: p.status === 'CHOSEN' ? 'NOT_PICKED' : 'ALL_REJECTED', codes: [],
-      });
+
+  // 2. One row shape for the grid. Agent payments show the item and the anonymous buyer label, never
+  //    anything about the customer; other transactions show the payer the way PayPal shows it.
+  const rows = paypal.map((t) => {
+    const a = matched.get(t.id);
+    const itemText = t.items.map((i) => (i.quantity > 1 ? `${i.quantity} × ${i.name}` : i.name)).join(', ');
+    return {
+      id: t.id,
+      at: t.at,
+      type: t.type,
+      kind: t.kind,
+      direction: t.direction,
+      source: a ? SOURCE_AGENT : t.source,
+      agent: Boolean(a),
+      paidVia: a ? a.paidVia : t.source,
+      product: a ? a.product : itemText || t.subject || t.type,
+      items: a ? [a.product] : t.items.map((i) => i.name),
+      lines: a ? [{ name: a.product, quantity: 1, amount: t.gross }] : t.items.map((i) => ({ name: i.name, quantity: i.quantity, amount: i.amount ?? 0 })),
+      category: a ? a.category : '',
+      storefront: a ? a.storefront : '',
+      customer: a ? a.customer : t.payerName || t.payerEmail || (t.direction === 'in' ? 'PayPal' : ''),
+      payerEmail: a ? '' : t.payerEmail,
+      amount: t.gross,
+      fee: t.fee,
+      net: t.net,
+      currency: t.currency,
+      status: DISPLAY_STATUS[t.status],
+      invoiceId: t.invoiceId,
+      paypalRef: t.id,
+      paypal: 'Confirmed',
+      paypalNote: 'In your PayPal transaction report',
+      inReport: true,
+      sample: false,
+      relatedTo: '',
+    };
+  });
+  // 3. Agent payments PayPal has not reported (yet): shown at once from the ledger.
+  for (const a of agent) {
+    if (used.has(a.id)) continue;
+    rows.push({
+      id: a.id, at: a.at, type: a.status === 'Failed' ? 'Payment failed' : 'Payment received', kind: a.status === 'Failed' ? 'other' : 'sale', direction: a.status === 'Failed' ? 'none' : 'in',
+      source: SOURCE_AGENT, agent: true, paidVia: a.paidVia, product: a.product, items: [a.product],
+      lines: [{ name: a.product, quantity: 1, amount: a.amount }], category: a.category,
+      storefront: a.storefront, customer: a.customer, payerEmail: '', amount: a.amount, fee: null as unknown as number, net: null as unknown as number,
+      currency: 'USD', status: a.status, invoiceId: '', paypalRef: a.paypalRef, paypal: a.paypal,
+      paypalNote: conn.connected ? `Not in your PayPal transaction report yet (PayPal can take a few hours). ${a.paypalNote}` : a.paypalNote,
+      inReport: false,
+      sample: false,
+      relatedTo: '',
     });
   }
+  // 4. Demo sample transactions (BIZ_SAMPLE_DATA=0 turns them off), then the merchant's own notes.
+  const samples = sampleTransactions(biz);
+  rows.push(...samples);
+  const notes = await notesOf(biz);
+  for (const r of rows) Object.assign(r, { reconciled: false, tag: '', note: '', ...notes[r.id] });
+  rows.sort((x, y) => (x.at < y.at ? 1 : -1));
 
-  const policies = await policiesFor(raw.map((r) => r.vaultId));
-  return raw
-    .sort((a, b) => b.at.getTime() - a.at.getTime())
-    .map((r) => {
-      const rules = rulesAt(policies.get(r.vaultId) ?? [], r.at);
-      const shop = ours(r.req.merchant)!;
-      const { group, detail } = explain(r.code, r.req, rules, shop);
-      const limit = rules.max_single_transaction;
-      return {
-        id: r.id,
-        at: r.at.toISOString(),
-        product: productName(r.req.reason, r.req.category),
-        category: r.req.category ?? '',
-        storefront: shop,
-        amount: toCents(r.req.amount) / 100,
-        customerLimit: limit === undefined || ['NOT_PICKED', 'ALL_REJECTED'].includes(r.code) ? null : Number(limit),
-        reason: group,
-        detail,
-        customer: customerLabel(biz, r.userId),
-        allReasons: r.codes.map((c) => explain(c, r.req, rules, shop).group).filter((g, i, all) => all.indexOf(g) === i),
-        channel3Id: (r.req.channel3?.product_id as string | undefined) ?? null,
-      };
-    });
+  // The connected PayPal account should contain the agent payments. If none of the older ones are there,
+  // the agents are paying a different PayPal account than the one connected: say so.
+  const settled = agent.filter((a) => a.status === 'Completed' && Date.now() - Date.parse(a.at) > 6 * 3_600_000);
+  // Name the account the agents pay when it is not the one this dashboard is connected to.
+  const payTo = [...new Set((await storefronts(biz)).map((s) => s.sandboxEmail).filter(Boolean))];
+  const elsewhere = payTo.filter((e) => e.toLowerCase() !== biz.sandboxEmail.toLowerCase());
+  const warning = conn.connected && settled.length && !settled.some((a) => used.has(a.id))
+    ? elsewhere.length
+      ? `None of your ${settled.length} AI-agent payments are in the connected PayPal account (${biz.sandboxEmail}). Agents pay ${elsewhere.join(', ')}: connect that account's API credentials, or register ${biz.sandboxEmail} as ${biz.name}'s payout account, to see them in PayPal's records.`
+      : `None of your ${settled.length} AI-agent payments are in the connected PayPal account. Agents pay the PayPal account registered for ${biz.name}; connect that account's API credentials to see them in PayPal's records.`
+    : null;
+  return { rows, connection: { ...conn, warning, agentInReport: settled.filter((a) => used.has(a.id)).length, agentPayments: agent.length, samples: samples.length } };
 }
-
-// ---------- Market check for missed sales (Channel3) ----------
-// For each product an agent wanted but did not buy here: what the same product costs at other stores
-// right now, and whether that price is low / typical / high for the last 90 days.
-//   - Known Channel3 product (saved with newer purchases and options): read it by id (free).
-//   - Older rows: one Channel3 search by product name, used only when the titles clearly match.
-// Cached for 12 hours per product, so a dashboard reload costs no Channel3 credits.
-
-export type Market = {
-  marketLow: number;
-  cheapestAt: string;
-  stores: { store: string; price: number }[];
-  trend: 'low' | 'typical' | 'high' | null;
-  average: number | null;
-  days: number | null;
-  matched: string; // Channel3's product title
-};
-
-const MARKET_TTL_MS = 12 * 60 * 60_000;
-const markets = new Map<string, { at: number; value: Market | null }>();
-
-const STOP_WORDS = new Set(['with', 'for', 'and', 'the', 'new', 'wireless', 'bluetooth', 'black', 'white', 'over', 'ear', 'on-ear']);
-const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length >= 4 && !STOP_WORDS.has(w)));
-const modelCode = (t: string) => t.toLowerCase().split(/[\s,()/|]+/).map((w) => w.replace(/[^a-z0-9]/g, ''))
-  .filter((w) => w.length >= 3 && /[a-z]/.test(w) && /\d/.test(w)).sort((a, b) => b.length - a.length)[0] ?? null;
 
 /**
- * Same product, matched by name (older rows without a Channel3 id): the same model code, or 3+ real
- * words in common; and a believable price. A wrong market price is worse than none.
+ * A fingerprint of this business's payments (how many, last change). The page polls it to know when
+ * to refresh, instead of listening to the platform's event stream, which carries every customer's
+ * vault events and must never reach a business.
  */
-function sameProduct(wanted: { title: string; price: number }, found: { title: string; price: number }) {
-  const code = modelCode(wanted.title);
-  const named = code ? code === modelCode(found.title) : (() => {
-    const a = words(wanted.title);
-    const b = words(found.title);
-    let n = 0;
-    for (const w of a) if (b.has(w)) n++;
-    return n >= 3;
-  })();
-  return named && found.price >= wanted.price * 0.4 && found.price <= wanted.price * 2.5;
+export async function pulse(biz: BusinessAccount) {
+  const shops = await storefronts(biz);
+  const [agg, paypal] = await Promise.all([
+    prisma.ledgerEntry.aggregate({
+      where: { type: 'SPEND', merchantId: { in: shops.map((s) => s.id) } },
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    }),
+    transactionsVersion(biz),
+  ]);
+  return { version: `${agg._count._all}:${agg._max.updatedAt?.getTime() ?? 0}:${paypal}` };
 }
 
-/** "www.bestbuy.com" -> "BestBuy" (registered merchants), else "Amazon" from "amazon.com". */
-async function storeNames() {
-  const merchants = await prisma.merchant.findMany({ where: { domain: { not: null } }, select: { name: true, domain: true } });
-  const known = new Map(merchants.map((m) => [m.domain!.toLowerCase(), m.name]));
-  return (domain: string) => {
-    const host = domain.toLowerCase().replace(/^www\./, '');
-    if (known.has(host)) return known.get(host)!;
-    const label = host.split('.')[0] ?? host;
-    return label.charAt(0).toUpperCase() + label.slice(1);
+// ---------- Bought together: product pairs the same (anonymised) buyer paid for ----------
+// Built only from payments this business received. The response holds counts, never customer labels,
+// and a pair appears only once enough different buyers paid for both (so nobody can be singled out).
+
+export const TOGETHER_MIN_BUYERS = 2;
+export const TOGETHER_WINDOW_DAYS = 30;
+
+export async function together(biz: BusinessAccount) {
+  // Every sale on the business's PayPal account (agent or not), one entry per item in it.
+  const sales = (await transactions(biz)).rows.filter((o) => o.kind === 'sale' && !['Failed', 'Reversed'].includes(o.status) && o.customer);
+  const paid = sales.flatMap((o) => o.items.filter(Boolean).map((item) => ({
+    at: o.at, product: item, category: o.category, customer: o.customer,
+    amount: o.items.length === 1 ? o.amount : o.amount / o.items.length,
+  })));
+  const category = new Map<string, string>();
+  const productBuyers = new Map<string, Set<string>>();
+  const byBuyer = new Map<string, typeof paid>();
+  for (const o of paid) {
+    if (o.category && !category.has(o.product)) category.set(o.product, o.category);
+    (productBuyers.get(o.product) ?? productBuyers.set(o.product, new Set()).get(o.product)!).add(o.customer);
+    (byBuyer.get(o.customer) ?? byBuyer.set(o.customer, []).get(o.customer)!).push(o);
+  }
+
+  type Pair = { a: string; b: string; buyers: Set<string>; revenue: number; gaps: number[]; last: number };
+  const pairs = new Map<string, Pair>();
+  for (const [buyer, list] of byBuyer) {
+    // One entry per product for this buyer: first time they paid for it, and everything they paid for it.
+    const bought = new Map<string, { at: number; last: number; amount: number }>();
+    for (const o of list) {
+      const t = Date.parse(o.at);
+      const b = bought.get(o.product);
+      if (!b) bought.set(o.product, { at: t, last: t, amount: o.amount });
+      else { b.at = Math.min(b.at, t); b.last = Math.max(b.last, t); b.amount += o.amount; }
+    }
+    const products = [...bought.keys()].sort();
+    for (let i = 0; i < products.length; i++) {
+      for (let j = i + 1; j < products.length; j++) {
+        const A = bought.get(products[i]!)!;
+        const B = bought.get(products[j]!)!;
+        const gapDays = Math.abs(A.at - B.at) / 86_400_000;
+        if (gapDays > TOGETHER_WINDOW_DAYS) continue;
+        const key = `${products[i]}\u0000${products[j]}`;
+        const p = pairs.get(key) ?? pairs.set(key, { a: products[i]!, b: products[j]!, buyers: new Set(), revenue: 0, gaps: [], last: 0 }).get(key)!;
+        p.buyers.add(buyer);
+        p.revenue += A.amount + B.amount;
+        p.gaps.push(gapDays);
+        p.last = Math.max(p.last, A.last, B.last);
+      }
+    }
+  }
+
+  const median = (list: number[]) => {
+    const s = [...list].sort((x, y) => x - y);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
   };
+  const rows = [...pairs.values()]
+    .filter((p) => p.buyers.size >= TOGETHER_MIN_BUYERS)
+    .map((p) => {
+      // Lead = the product more buyers paid for; attach rate = how many of its buyers also paid for the other.
+      const [lead, follow] = productBuyers.get(p.a)!.size >= productBuyers.get(p.b)!.size ? [p.a, p.b] : [p.b, p.a];
+      return {
+        id: `${lead}\u0000${follow}`,
+        productA: lead,
+        categoryA: category.get(lead) ?? '',
+        productB: follow,
+        categoryB: category.get(follow) ?? '',
+        buyers: p.buyers.size,
+        leadBuyers: productBuyers.get(lead)!.size,
+        attachRate: p.buyers.size / productBuyers.get(lead)!.size,
+        gapDays: Math.round(median(p.gaps) * 10) / 10,
+        revenue: Math.round(p.revenue * 100) / 100,
+        lastAt: new Date(p.last).toISOString(),
+      };
+    })
+    .sort((x, y) => y.buyers - x.buyers || y.revenue - x.revenue);
+  return { minBuyers: TOGETHER_MIN_BUYERS, windowDays: TOGETHER_WINDOW_DAYS, pairs: rows };
 }
 
-const lowestPrice = (p: any) => Math.min(...(p.offers ?? []).map((o: any) => Number(o.price?.price)).filter((n: number) => n > 0), Infinity);
-
-async function lookupMarket(title: string, price: number, productId: string | null, name: (d: string) => string): Promise<Market | null> {
-  let product: any = null;
-  if (productId) product = await c3(`/v1/products/${encodeURIComponent(productId)}`).catch(() => null);
-  if (!product) {
-    if (!modelCode(title) && words(title).size < 3) return null; // too vague to look up ("Sony headphones")
-    const found = await c3('/v1/search', { method: 'POST', body: JSON.stringify({ query: title.slice(0, 120), limit: 5, filters: { availability: ['InStock'] } }) });
-    product = (found.products ?? []).find((p: any) => sameProduct({ title, price }, { title: p.title ?? '', price: lowestPrice(p) })) ?? null;
-  }
-  if (!product) return null;
-  const offers = (product.offers ?? [])
-    .filter((o: any) => (!o.availability || o.availability === 'InStock') && (!o.price?.currency || o.price.currency === 'USD') && Number(o.price?.price) > 0)
-    .map((o: any) => ({ store: name(o.domain ?? new URL(o.url).hostname), price: Number(o.price.price) }))
-    .sort((a: any, b: any) => a.price - b.price);
-  if (!offers.length) return null;
-  const history = await priceHistory(product.id);
-  return {
-    marketLow: offers[0].price,
-    cheapestAt: offers[0].store,
-    stores: offers.slice(0, 5),
-    trend: history ? priceVerdict(offers[0].price, history) : null,
-    average: history?.mean ?? null,
-    days: history?.days ?? null,
-    matched: String(product.title ?? ''),
-  };
-}
-
-/** Market data per missed-sale row id (rows without a confident match are left out). */
-export async function missedMarket(biz: BusinessAccount): Promise<Record<string, Market>> {
-  if (!process.env.CHANNEL3_API_KEY?.trim()) return {};
-  const rows = await missed(biz);
-  const name = await storeNames();
-  const keyOf = (r: (typeof rows)[number]) => r.channel3Id ?? r.product.toLowerCase();
-  const todo = new Map<string, (typeof rows)[number]>();
-  for (const r of rows) if (!todo.has(keyOf(r))) todo.set(keyOf(r), r);
-
-  // A few lookups at a time; each product at most once per 12 hours.
-  const keys = [...todo.keys()];
-  for (let i = 0; i < keys.length; i += 4) {
-    await Promise.all(keys.slice(i, i + 4).map(async (key) => {
-      const hit = markets.get(key);
-      if (hit && Date.now() - hit.at < MARKET_TTL_MS) return;
-      const r = todo.get(key)!;
-      const value = await lookupMarket(r.product, r.amount, r.channel3Id, name).catch((err: Error) => {
-        console.warn('[market] Channel3 lookup failed:', err.message.slice(0, 160));
-        return null;
-      });
-      markets.set(key, { at: Date.now(), value });
-    }));
-  }
-  const out: Record<string, Market> = {};
-  for (const r of rows) {
-    const m = markets.get(keyOf(r))?.value;
-    if (m) out[r.id] = m;
-  }
-  return out;
-}
-
-// ---------- Ask the grid in plain English ----------
+// ---------- Ask the grid in plain English (the business's own payments only) ----------
 
 const GRID_COLUMNS = {
-  orders: {
-    at: 'date', product: 'text', category: 'text', storefront: 'text', amount: 'number', paidVia: 'text',
-    status: 'text (Paid, Pending, Failed)', customer: 'text', approval: 'text (Autopilot, Picked by customer, Approved by customer)',
-  },
-  missed: {
-    at: 'date', product: 'text', category: 'text', storefront: 'text', amount: 'number', customerLimit: 'number',
-    reason: 'text', customer: 'text', marketLow: 'number (lowest price at any store, Channel3)', cheapestAt: 'text (store with the market low)',
-    marketTrend: 'text (low, typical, high vs 90 days)',
-  },
+  at: 'date', type: 'text (Payment received, Payout received, Refund, Fee, Withdrawal to bank, Transfer...)',
+  source: `text (${SOURCE_AGENT}, PayPal Checkout, PayPal Payouts, Invoice, Subscription, PayPal payment, Bank)`,
+  product: 'text (item)', customer: 'text (payer)', category: 'text', amount: 'number (gross, negative = money out)',
+  fee: 'number (negative)', net: 'number', status: 'text (Completed, Pending, Failed, Reversed)',
+  paypal: 'text (Confirmed, Processing, Differs, Not checked)',
 } as const;
-export type GridName = keyof typeof GRID_COLUMNS;
+export type GridName = 'orders';
 
 const AskSchema = z.object({
   filters: z.array(z.object({
@@ -398,25 +324,21 @@ const AskSchema = z.object({
 });
 export type AskResult = z.infer<typeof AskSchema>;
 
-const GROUPABLE: Record<GridName, string[]> = {
-  orders: ['day', 'product', 'category', 'storefront', 'paidVia', 'status', 'customer', 'approval'],
-  missed: ['reason', 'day', 'product', 'category', 'storefront', 'customer'],
-};
+const GROUPABLE = ['day', 'type', 'source', 'product', 'category', 'status', 'paypal', 'customer'];
 
 /** Models that just said "out of quota" are skipped for a while instead of being retried on every question. */
 const cooldown = new Map<string, number>();
 const QUOTA_COOLDOWN_MS = 10 * 60_000;
 
-export async function ask(grid: GridName, text: string, now = new Date()): Promise<AskResult & { model: string }> {
-  const cols = GRID_COLUMNS[grid];
+export async function ask(_grid: GridName, text: string, now = new Date()): Promise<AskResult & { model: string }> {
   const system = [
-    `You turn a business owner's request into settings for a data grid of ${grid === 'orders' ? 'orders that AI shopping agents placed with their shop' : 'missed sales: purchases AI agents attempted at their shop but that were blocked or declined'}.`,
-    `Columns (id: type): ${Object.entries(cols).map(([k, v]) => `${k}: ${v}`).join('; ')}.`,
-    `Group-by options: ${GROUPABLE[grid].join(', ')} ("day" groups by date).`,
+    'You turn a business owner\'s request into settings for a data grid of every transaction on their PayPal business account (sales, AI-agent payments, refunds, fees, withdrawals).',
+    `Columns (id: type): ${Object.entries(GRID_COLUMNS).map(([k, v]) => `${k}: ${v}`).join('; ')}.`,
+    `Group-by options: ${GROUPABLE.join(', ')} ("day" groups by date).`,
     `Today is ${now.toISOString().slice(0, 10)} (${now.toLocaleDateString('en-US', { weekday: 'long' })}). "This week" starts on Monday. Dates are YYYY-MM-DD.`,
     'Number columns are US dollars. For dates use after/before/inRange. For text use contains/equals/notEqual.',
     'Use only the listed column ids. Prefer column filters over search. Keep everything empty/null that the request does not ask for.',
-    grid === 'orders' ? '"Refunds" or "failed" means status Failed. "Biggest" means amount descending.' : '"Too expensive" or "price limit" means reason contains "price limit". "Cheaper elsewhere" means marketLow less than amount (compare with a number filter only if a value is given).',
+    '"Refunds" means type contains Refund. "Failed" means status Failed. "AI agents" / "agent payments" means source contains "AI agent". "Customer" or "payer" means the customer column. "Biggest" means amount descending.',
   ].join('\n');
 
   let lastError: unknown;
@@ -424,11 +346,11 @@ export async function ask(grid: GridName, text: string, now = new Date()): Promi
     if ((cooldown.get(model.modelId) ?? 0) > Date.now()) continue; // out of quota a moment ago: skip it for now
     try {
       const { object } = await generateObject({ model, schema: AskSchema, system, prompt: text, temperature: 0, maxRetries: 1 });
-      const known = (c: string) => c in cols;
+      const known = (c: string) => c in GRID_COLUMNS;
       return {
         filters: object.filters.filter((f) => known(f.column)),
         sort: object.sort.filter((s) => known(s.column)),
-        groupBy: object.groupBy && GROUPABLE[grid].includes(object.groupBy) ? object.groupBy : null,
+        groupBy: object.groupBy && GROUPABLE.includes(object.groupBy) ? object.groupBy : null,
         search: object.search?.trim() || null,
         explanation: object.explanation,
         model: model.modelId,
@@ -441,7 +363,7 @@ export async function ask(grid: GridName, text: string, now = new Date()): Promi
   }
   // Every AI model is down (quota used up, overloaded): understand the common requests ourselves,
   // so the grid still answers. Only when nothing is recognised does the owner see an error.
-  const quick = quickAsk(grid, text, now);
+  const quick = quickAsk('orders', text, now);
   if (quick) return quick;
   throw new Error(`The AI is busy right now and that request needs it. Try a simpler one (e.g. "over $40 this week") or again in a minute. (${(lastError as Error)?.message.slice(0, 80) ?? ''})`);
 }
@@ -451,35 +373,28 @@ export async function ask(grid: GridName, text: string, now = new Date()): Promi
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 
-/** The words people use for each grouping / text value, per grid. */
-const GROUP_WORDS: Record<GridName, [RegExp, string][]> = {
-  orders: [[/\b(day|date|daily)\b/, 'day'], [/\bproducts?\b/, 'product'], [/\bcategor(y|ies)\b/, 'category'], [/\b(paid via|payment method|method)\b/, 'paidVia'], [/\bstatus\b/, 'status'], [/\bcustomers?\b/, 'customer'], [/\b(approv\w*|how approved)\b/, 'approval']],
-  missed: [[/\b(reasons?|why)\b/, 'reason'], [/\b(day|date|daily)\b/, 'day'], [/\bproducts?\b/, 'product'], [/\bcategor(y|ies)\b/, 'category'], [/\bcustomers?\b/, 'customer']],
-};
-const VALUE_WORDS: Record<GridName, [RegExp, { column: string; value: string; label: string }][]> = {
-  orders: [
-    [/\b(fail(ed|ures?)?|refund(s|ed)?)\b/, { column: 'status', value: 'Failed', label: 'that failed' }],
-    [/\bpending\b/, { column: 'status', value: 'Pending', label: 'still pending' }],
-    [/\bcheckout\b/, { column: 'paidVia', value: 'Checkout', label: 'paid with PayPal Checkout' }],
-    [/\bpayouts?\b/, { column: 'paidVia', value: 'Payouts', label: 'paid with PayPal Payouts' }],
-    [/\bautopilot\b/, { column: 'approval', value: 'Autopilot', label: 'bought on Autopilot' }],
-    [/\b(picked|chose|chosen)\b/, { column: 'approval', value: 'Picked', label: 'picked by the customer' }],
-    [/\bapproved\b/, { column: 'approval', value: 'Approved', label: 'approved by the customer' }],
-  ],
-  missed: [
-    [/\b(too expensive|price limit|over (the )?limit|overpriced|expensive)\b/, { column: 'reason', value: 'price limit', label: 'over the customer\'s price limit' }],
-    [/\bbudget\b/, { column: 'reason', value: 'budget', label: 'where the customer\'s budget ran out' }],
-    [/\b(said no|declined|rejected|refused)\b/, { column: 'reason', value: 'said no', label: 'where the customer said no' }],
-    [/\b(another option|other option|picked another|chose another)\b/, { column: 'reason', value: 'another option', label: 'where the customer picked another option' }],
-    [/\b(price changed|price mismatch|checkout price)\b/, { column: 'reason', value: 'Price changed', label: 'where the price changed at checkout' }],
-    [/\b(bill|invoice)\b/, { column: 'reason', value: 'Bill', label: 'where the bill did not match' }],
-    [/\b(rules changed|changed (their )?rules)\b/, { column: 'reason', value: 'rules', label: 'where the customer changed their rules' }],
-    [/\b(error|errors)\b/, { column: 'reason', value: 'error', label: 'with payment errors' }],
-  ],
-};
-const STOP = new Set('show me all only the a an of in on for with from to and or by my our your this that last week weeks month months today yesterday day days over under above below more less than between biggest largest highest smallest cheapest lowest newest latest oldest recent first group sort sorted orders order sales sale missed payments payment what which were was are is it them those items item please list find get see view top'.split(' '));
+/** The words people use for each grouping / text value. */
+const GROUP_WORDS: [RegExp, string][] = [
+  [/\b(day|date|daily)\b/, 'day'], [/\btypes?\b/, 'type'], [/\b(source|channel|paid via|payment method|method)\b/, 'source'],
+  [/\bproducts?|items?\b/, 'product'], [/\bcategor(y|ies)\b/, 'category'],
+  [/\bstatus\b/, 'status'], [/\bpaypal check\b/, 'paypal'], [/\b(customers?|payers?|buyers?)\b/, 'customer'],
+];
+const VALUE_WORDS: [RegExp, { column: string; value: string; label: string }][] = [
+  [/\b(ai|agents?|vault)\b/, { column: 'source', value: 'AI agent', label: 'from AI agents' }],
+  [/\brefund(s|ed)?\b/, { column: 'type', value: 'Refund', label: 'that are refunds' }],
+  [/\bfees?\b/, { column: 'type', value: 'Fee', label: 'that are fees' }],
+  [/\bwithdraw(al|als|n)?\b/, { column: 'type', value: 'Withdrawal', label: 'that are withdrawals' }],
+  [/\bfail(ed|ures?)?\b/, { column: 'status', value: 'Failed', label: 'that failed' }],
+  [/\bpending\b/, { column: 'status', value: 'Pending', label: 'still pending' }],
+  [/\bcheckout\b/, { column: 'source', value: 'Checkout', label: 'from PayPal Checkout' }],
+  [/\binvoices?\b/, { column: 'source', value: 'Invoice', label: 'from invoices' }],
+  [/\bpayouts?\b/, { column: 'source', value: 'Payouts', label: 'from PayPal Payouts' }],
+  [/\b(confirmed|verified)\b/, { column: 'paypal', value: 'Confirmed', label: 'confirmed by PayPal' }],
+  [/\b(differs|mismatch(ed)?)\b/, { column: 'paypal', value: 'Differs', label: 'that differ from PayPal\'s records' }],
+];
+const STOP = new Set('show me all only the a an of in on for with from to and or by my our your this that last week weeks month months today yesterday day days over under above below more less than between biggest largest highest smallest cheapest lowest newest latest oldest recent first group sort sorted orders order sales sale payments payment what which were was are is it them those items item please list find get see view top'.split(' '));
 
-export function quickAsk(grid: GridName, input: string, now = new Date()): (AskResult & { model: string }) | null {
+export function quickAsk(_grid: GridName, input: string, now = new Date()): (AskResult & { model: string }) | null {
   const text = input.toLowerCase().replace(/[,]/g, ' ');
   const filters: AskResult['filters'] = [];
   const sort: AskResult['sort'] = [];
@@ -512,14 +427,14 @@ export function quickAsk(grid: GridName, input: string, now = new Date()): (AskR
   else if (/\blast month\b/.test(text)) range(new Date(today.getFullYear(), today.getMonth() - 1, 1), new Date(today.getFullYear(), today.getMonth(), 0), 'last month');
   else if (/\bthis month\b/.test(text)) range(new Date(today.getFullYear(), today.getMonth(), 1), today, 'this month');
 
-  // Known values (status, payment method, lost-sale reason...)
-  for (const [re, f] of VALUE_WORDS[grid]) {
+  // Known values (status, payment method, PayPal check)
+  for (const [re, f] of VALUE_WORDS) {
     if (re.test(text) && !filters.some((x) => x.column === f.column)) { filters.push({ column: f.column, op: 'contains', value: f.value, valueTo: null }); said.push(f.label); }
   }
 
   // Grouping: "group by X", "by X", "per X"
   const groupPart = /(?:group(?:ed)?\s+by|per|by)\s+([a-z ]+)/.exec(text)?.[1] ?? '';
-  for (const [re, col] of GROUP_WORDS[grid]) if (re.test(groupPart)) { groupBy = col; break; }
+  for (const [re, col] of GROUP_WORDS) if (re.test(groupPart)) { groupBy = col; break; }
 
   // Sorting
   if (/\b(biggest|largest|highest|most expensive|top)\b/.test(text)) sort.push({ column: 'amount', direction: 'desc' });
@@ -529,15 +444,14 @@ export function quickAsk(grid: GridName, input: string, now = new Date()): (AskR
 
   // Anything left that looks like a product word ("headphones only") becomes a quick search.
   const rest = text.replace(/\$?\d+(\.\d+)?/g, ' ').split(/[^a-z]+/).filter((w) => w.length > 3 && !STOP.has(w)
-    && !VALUE_WORDS[grid].some(([re]) => re.test(w)) && !GROUP_WORDS[grid].some(([re]) => re.test(w)));
+    && !VALUE_WORDS.some(([re]) => re.test(w)) && !GROUP_WORDS.some(([re]) => re.test(w)));
   const search = !groupBy && rest.length === 1 ? rest[0]! : null;
   if (search) said.push(`matching “${search}”`);
 
   if (!filters.length && !sort.length && !groupBy && !search) return null;
-  const what = grid === 'orders' ? 'orders' : 'missed sales';
   const explanation = [
-    `Showing ${what}${said.length ? ` ${said.join(', ')}` : ''}`,
-    groupBy ? `, grouped by ${groupBy === 'paidVia' ? 'payment method' : groupBy}` : '',
+    `Showing transactions${said.length ? ` ${said.join(', ')}` : ''}`,
+    groupBy ? `, grouped by ${groupBy === 'paypal' ? 'PayPal check' : groupBy === 'customer' ? 'payer' : groupBy}` : '',
     sort[0] ? `, ${sort[0].column === 'amount' ? (sort[0].direction === 'desc' ? 'biggest' : 'smallest') : sort[0].direction === 'desc' ? 'newest' : 'oldest'} first` : '',
     '.',
   ].join('');

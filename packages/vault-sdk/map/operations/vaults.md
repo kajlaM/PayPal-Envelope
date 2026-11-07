@@ -176,12 +176,12 @@ Accessor: `client.vaults` · Source: `src/resources/vaults.ts` · 9 operations �
 
 ### syncVault
 
-- **Signature**: `syncVault(request: Vaults.SyncVaultRequest, options?: RequestOptions): ApiPromise<Record<string, unknown>, Vaults.SyncVaultError>`
+- **Signature**: `syncVault(request: Vaults.SyncVaultRequest, options?: RequestOptions): ApiPromise<ApiVaultsSyncResponse[], Vaults.SyncVaultError>`
 - **Wire**: `POST /api/vaults/{id}/sync`
 - **Auth**: none — public; no credential is sent
 - **Request body**: none — no `Content-Type` header is sent
 - **SDK-sent**: `header Idempotency-Key` (minted per call)
-- **Returns**: `Record<string, unknown>` — a bare `application/json` map; the success type *is* the map
+- **Returns**: `ApiVaultsSyncResponse[]` — a bare `application/json` array; the success type *is* the array, not a wrapper model
 - **Error**: `PayPalVaultApiError` with `kind: "api"`, an instance of `Vaults.SyncVaultError` — **typed arms**, narrowed on `err.payload.kind`
 - **Error arms**: `"error"` [400] `Error` · `"error2"` [404] `Error` · `"error3"` [409] `Error` · `"error4"` [502] `Error` · `"undeclared"` [any other] `rawBody: ArrayBuffer`
 
@@ -193,5 +193,6 @@ Accessor: `client.vaults` · Source: `src/resources/vaults.ts` · 9 operations �
 
 | Type | Schema value | Source |
 | --- | --- | --- |
+| `ApiVaultsSyncResponse` | `apiVaultsSyncResponseSchema` | `src/models/api-vaults-sync-response.ts` |
 | `Error` | `errorSchema` | `src/models/error.ts` |
 

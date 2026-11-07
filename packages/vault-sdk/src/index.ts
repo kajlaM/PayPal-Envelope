@@ -71,6 +71,10 @@ export {
   apiVaultsSubscribeConfirmRequestSchema,
   type ApiVaultsSubscribeConfirmRequest,
 } from "./models/api-vaults-subscribe-confirm-request.js";
+export {
+  apiVaultsSyncResponseSchema,
+  type ApiVaultsSyncResponse,
+} from "./models/api-vaults-sync-response.js";
 export { channel3Schema, type Channel3 } from "./models/channel3.js";
 export { channel31Schema, type Channel31 } from "./models/channel31.js";
 export { Condition, conditionSchema } from "./models/condition.js";
@@ -84,14 +88,13 @@ export { Every, everySchema } from "./models/every.js";
 export { historySchema, type History } from "./models/history.js";
 export { itemSchema, type Item } from "./models/item.js";
 export { ledgerEntrySchema, type LedgerEntry } from "./models/ledger-entry.js";
-export { ledgerEntry1Schema, type LedgerEntry1 } from "./models/unions/ledger-entry1.js";
 export { liquidationSchema, type Liquidation } from "./models/liquidation.js";
 export { listSchema, type List } from "./models/list.js";
 export { mismatchSchema, type Mismatch } from "./models/mismatch.js";
 export { OnPolicyViolation, onPolicyViolationSchema } from "./models/on-policy-violation.js";
 export { optionSchema, type Option } from "./models/option.js";
 export { PayPalCheck, payPalCheckSchema } from "./models/pay-pal-check.js";
-export { paypalCheck1Schema, type PaypalCheck1 } from "./models/unions/paypal-check1.js";
+export { PaypalCheck1, paypalCheck1Schema } from "./models/paypal-check1.js";
 export { pointSchema, type Point } from "./models/unions/point.js";
 export { policySchema, type Policy } from "./models/policy.js";
 export { Rebalance, rebalanceSchema } from "./models/rebalance.js";

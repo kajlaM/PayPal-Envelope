@@ -1,5 +1,6 @@
 // Live PayPal balance of a sandbox BUSINESS account (Audio Store, City Utility).
-// 1. Preferred: PayPal's GetBalance API (NVP/SOAP API credentials of that business account, from
+// 0. Best: PayPal's REST Balances API with the business's own REST app (<PREFIX>_CLIENT_ID / _SECRET).
+// 1. Else: PayPal's GetBalance API (NVP/SOAP API credentials of that business account, from
 //    developer.paypal.com > Sandbox accounts > the account). Fast and official, no browser.
 //      <PREFIX>_API_USERNAME, <PREFIX>_API_PASSWORD, <PREFIX>_API_SIGNATURE   (e.g. AUDIO_STORE_API_...)
 // 2. Fallback: the same approach as the personal balance (sandbox-balance.ts, unchanged): a hidden
@@ -8,6 +9,7 @@
 import type { Page } from 'playwright-core';
 import type { Account, BusinessAccount } from './accounts.ts';
 import { login, parseBalance, parseLabeledBalance, withSandboxPage, type SandboxBalance } from './sandbox-balance.ts';
+import { restCredentials, restGet } from './business-transactions.ts';
 
 const SANDBOX = 'https://www.sandbox.paypal.com';
 const NVP = process.env.PAYPAL_NVP_URL?.trim() || 'https://api-3t.sandbox.paypal.com/nvp';
@@ -29,14 +31,18 @@ function apiCredentials(biz: BusinessAccount) {
 
 export async function businessBalance(biz: BusinessAccount, opts: { force?: boolean } = {}): Promise<SandboxBalance> {
   const api = apiCredentials(biz);
-  if (!api && !env(biz.sandboxPasswordEnv)) return { status: 'NO_PASSWORD', env: `${biz.apiEnvPrefix}_API_USERNAME / _API_PASSWORD / _API_SIGNATURE` };
+  const rest = restCredentials(biz);
+  if (!rest && !api && !env(biz.sandboxPasswordEnv)) return { status: 'NO_PASSWORD', env: `${biz.apiEnvPrefix}_API_USERNAME / _API_PASSWORD / _API_SIGNATURE` };
 
   const hit = cache.get(biz.username);
   if (!opts.force && hit && Date.now() - hit.at < CACHE_MS) return hit.result;
 
   let pending = reading.get(biz.username);
   if (!pending) {
-    pending = (api ? apiBalance(api) : browserBalance(biz))
+    // REST first; if the app may not read balances, fall back to the next way.
+    const older = () => (api ? apiBalance(api) : env(biz.sandboxPasswordEnv) ? browserBalance(biz) : Promise.reject(new Error('No other way to read the balance')));
+    const read = rest ? restBalance(biz).catch((err) => older().catch(() => Promise.reject(err))) : older();
+    pending = read
       .then((cents): SandboxBalance => ({ status: 'OK', cents, unclaimed: false, readAt: new Date().toISOString() }))
       .catch((err): SandboxBalance => ({ status: 'ERROR', message: (err as Error).message.split('\n')[0]! }))
       .then((result) => {
@@ -48,6 +54,15 @@ export async function businessBalance(biz: BusinessAccount, opts: { force?: bool
     reading.set(biz.username, pending);
   }
   return pending;
+}
+
+/** PayPal REST Balances API: the USD balance PayPal shows as available, in cents. */
+async function restBalance(biz: BusinessAccount): Promise<number> {
+  const body = await restGet(biz, '/v1/reporting/balances?currency_code=USD');
+  const usd = (body.balances ?? []).find((b: any) => b.currency === 'USD') ?? body.balances?.[0];
+  const value = usd?.available_balance?.value ?? usd?.total_balance?.value;
+  if (value == null) throw new Error('PayPal Balances API returned no USD balance');
+  return Math.round(Number(value) * 100);
 }
 
 /** PayPal GetBalance (NVP): the USD balance of the account the API credentials belong to, in cents. */

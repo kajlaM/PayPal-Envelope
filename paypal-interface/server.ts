@@ -19,6 +19,8 @@ import { BRYNTUM_OUT, ensureBryntum } from '../scripts/build-bryntum.mjs';
 import { ACCOUNTS, BUSINESS_ACCOUNTS, type Account, type BusinessAccount } from './accounts.ts';
 import * as business from './business.ts';
 import { businessBalance } from './business-balance.ts';
+import { connection as transactionsConnection, syncTransactions } from './business-transactions.ts';
+import { saveNote } from './business-notes.ts';
 import { autoLink, chargeSavedPayPal, finishLink, getLink, LinkError, startLink, unlink, type PayPalLink } from './paypal-link.ts';
 import { balanceChanged, sandboxBalance } from './sandbox-balance.ts';
 import { PayPalVaultError, vaultApi } from './vault-api.ts';
@@ -324,8 +326,12 @@ function apiRequest(req: IncomingMessage) {
   });
 }
 
+/** The platform's live socket carries every customer's vault events: never for a business login. */
+const businessOnSocket = (req: IncomingMessage) => Boolean(req.url?.startsWith('/socket.io') && readBusiness(req as Request));
+
 function proxyToApi(req: Request, res: Response) {
   req.url = req.originalUrl; // Express strips the mount path
+  if (businessOnSocket(req)) return res.status(403).json({ error: 'NOT_FOR_BUSINESS' });
   const upstream = apiRequest(req);
   upstream.on('response', (apiRes) => {
     res.writeHead(apiRes.statusCode ?? 502, apiRes.headers);
@@ -339,7 +345,7 @@ function proxyToApi(req: Request, res: Response) {
 }
 
 function proxyUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-  if (!isProxied(req.url)) return socket.destroy();
+  if (!isProxied(req.url) || businessOnSocket(req)) return socket.destroy();
   const upstream = apiRequest(req);
   upstream.on('upgrade', (apiRes, apiSocket, apiHead) => {
     const lines = [`HTTP/1.1 101 ${apiRes.statusMessage ?? 'Switching Protocols'}`];
@@ -1107,26 +1113,46 @@ app.get('/biz/balance', async (req, res) => {
   res.json(await businessBalance(loggedInBusiness(req), { force: req.query.fresh === '1' }));
 });
 
-app.get('/biz/orders', async (req, res) => {
-  res.json(await business.orders(loggedInBusiness(req)));
+// Every transaction on the business's PayPal account, with AI-agent payments recognised (agent buyers anonymous).
+app.get('/biz/transactions', async (req, res) => {
+  res.json(await business.transactions(loggedInBusiness(req)));
 });
 
-app.get('/biz/missed', async (req, res) => {
-  res.json(await business.missed(loggedInBusiness(req)));
+// The business's own bookkeeping on a transaction (Reconciled / Tag / Note), edited in the grid.
+app.post('/biz/notes', async (req, res) => {
+  const biz = loggedInBusiness(req);
+  const { id, field, value } = req.body ?? {};
+  try {
+    res.json(await saveNote(biz, String(id ?? ''), String(field ?? ''), value));
+  } catch (err) {
+    res.status(400).json({ error: 'BAD_NOTE', message: (err as Error).message });
+  }
 });
 
-// Channel3 market check for the missed sales: other stores' prices and the 90-day trend (loads after the grid).
-app.get('/biz/missed/market', async (req, res) => {
-  res.json(await business.missedMarket(loggedInBusiness(req)));
+// "Sync now": read new transactions from PayPal right away.
+app.post('/biz/sync', async (req, res) => {
+  const biz = loggedInBusiness(req);
+  await syncTransactions(biz, { force: true });
+  res.json(await transactionsConnection(biz));
+});
+
+// Payments-only change signal: the page polls this instead of the platform's live socket (which carries
+// every customer's vault events). A business only ever learns that its own payments changed.
+app.get('/biz/pulse', async (req, res) => {
+  res.set('Cache-Control', 'no-store').json(await business.pulse(loggedInBusiness(req)));
+});
+
+// Bought together: product pairs, counts only (a pair shows once enough different buyers paid for both).
+app.get('/biz/together', async (req, res) => {
+  res.json(await business.together(loggedInBusiness(req)));
 });
 
 app.post('/biz/ask', async (req, res) => {
   loggedInBusiness(req);
-  const grid = req.body?.grid === 'missed' ? 'missed' : 'orders';
   const text = String(req.body?.text ?? '').trim().slice(0, 300);
   if (!text) throw new HttpError(400, 'EMPTY_REQUEST');
   try {
-    res.json(await business.ask(grid, text));
+    res.json(await business.ask('orders', text));
   } catch (err) {
     res.status(503).json({ error: 'AI_UNAVAILABLE', message: (err as Error).message });
   }
@@ -1147,6 +1173,17 @@ const nodeRequire = createRequire(import.meta.url);
 const distOf = (pkg: string) => path.join(path.dirname(nodeRequire.resolve(pkg)), '..');
 app.get('/vendor/ag-grid.js', (_req, res) => res.sendFile('ag-grid-community.min.js', { root: distOf('ag-grid-community') }));
 app.get('/vendor/ag-charts.js', (_req, res) => res.sendFile('umd/ag-charts-community.min.js', { root: distOf('ag-charts-community') }));
+// Business page only: AG Grid Enterprise + AG Charts Enterprise (Integrated Charts, sparklines, Excel
+// export). The personal pages keep the Community bundles above. Load order matters: charts first, so the
+// grid's UMD bundle finds window.agCharts and registers Integrated Charts with it.
+app.get('/vendor/ag-charts-enterprise.js', (_req, res) => res.sendFile('umd/ag-charts-enterprise.min.js', { root: distOf('ag-charts-enterprise') }));
+app.get('/vendor/ag-grid-enterprise.js', (_req, res) => res.sendFile('ag-grid-enterprise.min.js', { root: distOf('ag-grid-enterprise') }));
+// AG Grid Enterprise licence from .env (AG_GRID_LICENSE_KEY). Without one the Enterprise features still
+// work, with AG Grid's trial watermark. Like the Bryntum key, it reaches the browser by design.
+app.get('/biz/ag-license.js', (_req, res) => {
+  res.type('application/javascript').set('Cache-Control', 'no-store');
+  res.send(`window.AG_GRID_LICENSE_KEY = ${JSON.stringify(process.env.AG_GRID_LICENSE_KEY?.trim() ?? '')};`);
+});
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
 // Bryntum Enterprise (Calendar, Scheduler, Gantt, TaskBoard sharing one core), bundled by

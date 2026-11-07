@@ -337,7 +337,7 @@ export class Funding {
   syncFundRequest(
     request: Funding.SyncFundRequestRequest,
     options?: RequestOptions,
-  ): ApiPromise<Record<string, unknown>, Funding.SyncFundRequestError> {
+  ): ApiPromise<Record<string, unknown> | null, Funding.SyncFundRequestError> {
     return this.#rawClient.execute(
       {
         method: "POST",
@@ -349,7 +349,7 @@ export class Funding {
         body: { kind: "empty" },
       },
       {
-        success: { kind: "json", schema: s.record(s.string(), s.unknown()) },
+        success: { kind: "json", schema: s.nullable(s.record(s.string(), s.unknown())) },
         errorFactory: Funding.SyncFundRequestError,
       },
       options,

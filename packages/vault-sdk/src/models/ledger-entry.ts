@@ -1,8 +1,8 @@
 import * as s from "../core/validation/index.js";
 import type { Schema } from "../core/validation/schema.js";
+import { paypalCheck1Schema, type PaypalCheck1 } from "./paypal-check1.js";
 import { statusSchema, type Status } from "./status.js";
 import { typeSchema, type Type } from "./type.js";
-import { paypalCheck1Schema, type PaypalCheck1 } from "./unions/paypal-check1.js";
 
 export type LedgerEntry = {
   id?: string;
@@ -12,7 +12,8 @@ export type LedgerEntry = {
   amountCents?: number;
   paypalRef?: string | null;
   paidVia?: string | null;
-  paypalCheck?: PaypalCheck1;
+  /** Last read-only check against PayPal's records; null = not checked yet */
+  paypalCheck?: PaypalCheck1 | null;
   paypalCheckedAt?: Date | null;
   paypalTxnId?: string | null;
   paypalCheckNote?: string | null;
@@ -27,7 +28,7 @@ export const ledgerEntrySchema: Schema<LedgerEntry> = s.object<LedgerEntry>({
   amountCents: s.optional(s.int()),
   paypalRef: s.optionalNullable(s.string()),
   paidVia: s.optionalNullable(s.string()),
-  paypalCheck: s.optional(s.lazy(() => paypalCheck1Schema)),
+  paypalCheck: s.optionalNullable(s.lazy(() => paypalCheck1Schema)),
   paypalCheckedAt: s.optionalNullable(s.dateTime()),
   paypalTxnId: s.optionalNullable(s.string()),
   paypalCheckNote: s.optionalNullable(s.string()),

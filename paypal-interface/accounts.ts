@@ -43,6 +43,9 @@ export type BusinessAccount = {
   sandboxEmail: string; // the PayPal sandbox business account that receives the payments
   sandboxPasswordEnv: string; // .env variable holding its sandbox.paypal.com login password
   apiEnvPrefix: string; // <prefix>_API_USERNAME / _API_PASSWORD / _API_SIGNATURE: NVP API credentials (GetBalance)
+  // <prefix>_CLIENT_ID / _CLIENT_SECRET of the business's own REST app (first found wins): all its PayPal
+  // transactions (Transaction Search) and its balance (Balances API).
+  restEnvPrefixes: string[];
 };
 
 const audioSandbox = process.env.AUDIO_STORE_SANDBOX_EMAIL?.trim() || 'audio-store-wallet@business.example.com';
@@ -57,6 +60,7 @@ export const BUSINESS_ACCOUNTS: Record<string, BusinessAccount> = {
     sandboxEmail: audioSandbox,
     sandboxPasswordEnv: 'AUDIO_STORE_SANDBOX_PASSWORD',
     apiEnvPrefix: 'AUDIO_STORE',
+    restEnvPrefixes: ['AUDIO_STORE'],
   },
   cityutility: {
     username: 'cityutility',
@@ -66,5 +70,6 @@ export const BUSINESS_ACCOUNTS: Record<string, BusinessAccount> = {
     sandboxEmail: citySandbox,
     sandboxPasswordEnv: 'CITY_UTILITY_SANDBOX_PASSWORD',
     apiEnvPrefix: 'CITY_UTILITY',
+    restEnvPrefixes: ['CITY_UTILITY', 'UTILITY'], // UTILITY_*: the REST app made for City Utility's invoices
   },
 };

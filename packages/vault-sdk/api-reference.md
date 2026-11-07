@@ -685,7 +685,7 @@ if (result.ok) {
 </details>
 
 <details>
-<summary><code>syncVault(request: Vaults.SyncVaultRequest, options?: RequestOptions): ApiPromise&lt;Record&lt;string, unknown&gt;, Vaults.SyncVaultError&gt;</code></summary>
+<summary><code>syncVault(request: Vaults.SyncVaultRequest, options?: RequestOptions): ApiPromise&lt;ApiVaultsSyncResponse[], Vaults.SyncVaultError&gt;</code></summary>
 
 <dl>
 <dd>
@@ -698,7 +698,7 @@ if (result.ok) {
 ```ts
 try {
   const response = await client.vaults.syncVault({ id: "some example string" });
-  // TODO: Handle 'response' of type Record<string, unknown>
+  // TODO: Handle 'response' of type ApiVaultsSyncResponse[]
 } catch (err) {
   // TODO: Handle 'err' of type Vaults.SyncVaultError, discriminated with 'err.payload.kind'
 }
@@ -716,7 +716,7 @@ try {
 const result = await client.vaults.syncVault({ id: "some example string" }).asApiResult();
 // TODO: Use 'result.status' and 'result.headers' to read the raw response status and headers
 if (result.ok) {
-  // TODO: Use 'result.value' of type Record<string, unknown>
+  // TODO: Use 'result.value' of type ApiVaultsSyncResponse[]
 } else {
   // TODO: Handle 'result', discriminated with 'result.payload.kind'
 }
@@ -744,12 +744,12 @@ if (result.ok) {
 
 **Direct**: `await client.vaults.syncVault(request)`
 
-- **OnSuccess**: <code>Record&lt;string, unknown&gt;</code>
+- **OnSuccess**: <code>[ApiVaultsSyncResponse](src/models/api-vaults-sync-response.ts)[]</code>
 - **OnError**: throws <code>[Vaults.SyncVaultError](src/resources/vaults.ts)</code>, with `err.payload` discriminated on `kind`
 
 **As ApiResult**: `await client.vaults.syncVault(request).asApiResult()`
 
-- **OnSuccess**: <code>[ApiResult](src/core/api-promise.ts)&lt;Record&lt;string, unknown&gt;, Vaults.SyncVaultError&gt;</code>, with `result.value` of type <code>Record&lt;string, unknown&gt;</code>
+- **OnSuccess**: <code>[ApiResult](src/core/api-promise.ts)&lt;ApiVaultsSyncResponse[], Vaults.SyncVaultError&gt;</code>, with `result.value` of type <code>[ApiVaultsSyncResponse](src/models/api-vaults-sync-response.ts)[]</code>
 - **OnError**: `result.payload` discriminated on `kind`, with `result.message`
 
 **Thrown**: <code>[PayPalVaultApiError](src/core/errors.ts)</code> on any operational failure — a caller abort and a programmer error stay outside the family and reach you raw
@@ -1437,7 +1437,7 @@ if (result.ok) {
 </details>
 
 <details>
-<summary><code>syncFundRequest(request: Funding.SyncFundRequestRequest, options?: RequestOptions): ApiPromise&lt;Record&lt;string, unknown&gt;, Funding.SyncFundRequestError&gt;</code></summary>
+<summary><code>syncFundRequest(request: Funding.SyncFundRequestRequest, options?: RequestOptions): ApiPromise&lt;Record&lt;string, unknown&gt; | null, Funding.SyncFundRequestError&gt;</code></summary>
 
 <dl>
 <dd>

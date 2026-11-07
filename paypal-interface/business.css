@@ -222,3 +222,179 @@
 .biz-under { color: #B54708; font-weight: 700; }
 .biz-why.biz-why-3 { grid-template-columns: 1.2fr 1.3fr 1fr; }
 .biz-c3 { margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: #5B21B6; background: #EDE9FE; padding: 1px 6px; border-radius: 999px; text-transform: none; }
+
+/* ======================================================================
+   Payment views: briefing, stampede watch, bought together, chart dock,
+   TV mode, accountant report
+   ====================================================================== */
+
+.biz-section-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.biz-section-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.biz-up { color: var(--pp-green); font-weight: 700; }
+.biz-down { color: var(--pp-red); font-weight: 700; }
+.biz-count-bad { background: #FDECEA; color: var(--pp-red); }
+
+/* ---------- Tab sub-panels ---------- */
+.biz-subpanel { display: flex; flex-direction: column; gap: 14px; }
+.biz-subpanel-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.biz-privacy-note { font-size: 13px; max-width: 760px; line-height: 1.45; }
+.biz-grid-short { height: 460px; }
+.biz-number { font: inherit; font-size: 14px; width: 72px; padding: 7px 8px; border: 1px solid var(--pp-gray-300); border-radius: var(--radius-sm); }
+
+/* ---------- Morning briefing (pinned top row of the Orders grid) ---------- */
+.biz-grid .ag-row-pinned.biz-briefing-row { background: #F3F9FD; font-weight: 400; cursor: pointer; }
+.biz-grid .ag-row-pinned.biz-briefing-row:hover { background: #EBF5FB; }
+.biz-briefing { display: flex; align-items: center; gap: 14px; height: 100%; white-space: nowrap; overflow: hidden; font-size: 13px; color: var(--pp-gray-900); }
+.biz-briefing-tag { flex: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--pp-blue-deep); background: var(--pp-white); border: 1px solid #B3D7F0; padding: 2px 10px; border-radius: var(--radius-pill); }
+.biz-briefing-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.biz-briefing-today { flex: none; margin-left: auto; color: var(--pp-gray-700); }
+.biz-briefing-go { flex: none; font-weight: 600; color: var(--pp-blue-primary); }
+
+/* ---------- Stampede watch ---------- */
+.biz-stampede-banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: #FDECEA; border: 1px solid #F5B5A8;
+  border-radius: var(--radius-md); padding: 12px 16px; font-size: 14px; color: var(--pp-gray-900);
+}
+.biz-stampede-banner > span:nth-child(2) { flex: 1; min-width: 240px; line-height: 1.45; }
+.biz-stampede-icon { font-size: 20px; color: var(--pp-red); }
+.biz-grid .ag-row.biz-row-alert { background: #FFF5F3; }
+.biz-ack {
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--pp-blue-deep);
+  background: var(--pp-white); border: 1px solid var(--pp-gray-300); border-radius: var(--radius-pill); padding: 3px 12px;
+}
+.biz-ack:hover { border-color: var(--pp-blue-primary); background: var(--pp-blue-light); }
+
+/* ---------- Bought together ---------- */
+.biz-pair { display: flex; flex-direction: column; line-height: 1.35; padding: 8px 0; white-space: normal; }
+.biz-pair span:first-child { font-weight: 600; }
+.biz-pair-plus { color: var(--pp-gray-700); }
+.biz-meter { display: inline-block; vertical-align: middle; width: 64px; height: 8px; background: var(--pp-gray-200); border-radius: 999px; overflow: hidden; margin-right: 8px; }
+.biz-meter span { display: block; height: 100%; background: var(--pp-blue-primary); border-radius: 999px; }
+.biz-meter-n { font-size: 12px; color: var(--pp-gray-700); }
+
+/* ---------- Integrated Charts dock ---------- */
+.biz-chart-dock { border-top: 1px solid var(--pp-gray-200); padding-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.biz-chart-dock header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.biz-chart-dock h3 { font-size: 15px; font-weight: 700; color: var(--pp-blue-deep); }
+.biz-chart-dock p { font-size: 12px; margin-top: 2px; }
+.biz-chart-host { height: 440px; position: relative; }
+.biz-chart-host > * { height: 100%; }
+
+/* ---------- TV mode ---------- */
+body.biz-tv-on { overflow: hidden; }
+.biz-tv {
+  position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; gap: 18px;
+  padding: 24px 32px; background: #071526; color: #F5F7FA; overflow: hidden;
+}
+.biz-tv-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.biz-tv-brand { display: flex; align-items: center; gap: 14px; }
+.biz-tv-shop { font-size: 28px; font-weight: 800; letter-spacing: -.01em; }
+.biz-tv-clock { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: #9FB3C8; }
+.biz-tv-exit {
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; color: #F5F7FA;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: var(--radius-pill); padding: 8px 16px;
+}
+.biz-tv-exit:hover { background: rgba(255,255,255,.16); }
+.biz-tv-exit kbd { font: inherit; font-size: 11px; margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,.14); }
+.biz-tv-alert { font-size: 18px; line-height: 1.4; background: #4A1410; border: 1px solid #A3301F; border-radius: var(--radius-md); padding: 12px 18px; }
+.biz-tv-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.biz-tv-kpis article { background: #0F2740; border: 1px solid #1C3550; border-radius: 14px; padding: 16px 20px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.biz-tv-kpis span { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #9FB3C8; }
+.biz-tv-kpis strong { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.biz-tv-kpis strong.biz-tv-top { font-size: 24px; line-height: 1.6; }
+.biz-tv-kpis em { font-style: normal; font-size: 15px; color: #9FB3C8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.biz-tv-grid { flex: 1; min-height: 0; }
+.biz-tv-grid .biz-tv-amount { font-weight: 800; color: #5BE49B; }
+.biz-tv-foot { font-size: 13px; color: #6B8299; }
+.biz-tv-pop {
+  position: absolute; top: 96px; right: 32px; z-index: 2; display: flex; flex-direction: column; gap: 2px;
+  background: #00875A; color: #FFFFFF; border-radius: 14px; padding: 14px 22px; box-shadow: 0 12px 32px rgba(0,0,0,.35);
+  max-width: 420px;
+}
+.biz-tv-pop strong { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.biz-tv-pop span { font-size: 15px; }
+.biz-tv-pop.show { animation: biz-tv-pop 4.5s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes biz-tv-pop {
+  0% { opacity: 0; transform: translateY(-12px) scale(.96); }
+  8%, 85% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: reduce) { .biz-tv-pop.show { animation: none; } }
+@media (max-width: 900px) {
+  .biz-tv { padding: 16px; }
+  .biz-tv-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .biz-tv-kpis strong { font-size: 28px; }
+}
+
+/* ---------- Accountant report dialog ---------- */
+.biz-dialog { border: none; border-radius: var(--radius-lg); padding: 0; width: min(520px, calc(100vw - 32px)); box-shadow: var(--shadow-lg); }
+.biz-dialog::backdrop { background: rgba(0, 28, 100, .35); }
+.biz-dialog-body { display: flex; flex-direction: column; gap: 14px; padding: 24px; }
+.biz-dialog-body h2 { font-size: 20px; font-weight: 800; color: var(--pp-blue-deep); }
+.biz-dialog-body > p { font-size: 13px; line-height: 1.5; }
+.biz-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--pp-gray-700); border: none; padding: 0; margin: 0; }
+.biz-field select { font: inherit; font-weight: 400; font-size: 14px; padding: 8px 10px; border: 1px solid var(--pp-gray-300); border-radius: var(--radius-sm); }
+.biz-field legend { margin-bottom: 6px; }
+.biz-field label { display: flex; align-items: center; gap: 8px; font-weight: 400; color: var(--pp-gray-900); }
+.biz-acct-preview { font-size: 13px; font-weight: 600; color: var(--pp-blue-deep); background: var(--pp-blue-light); padding: 8px 12px; border-radius: var(--radius-sm); }
+.biz-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* Off-screen grids that only feed the Excel export (rendered, never seen). */
+.biz-offscreen { position: absolute; left: -10000px; top: 0; width: 1px; height: 1px; overflow: hidden; }
+
+/* The briefing row spans every column; keep its text inside the visible part of the grid. */
+.biz-grid-wrap { container-type: inline-size; }
+.biz-briefing { max-width: calc(100cqw - 36px); }
+
+/* ---------- All PayPal transactions ---------- */
+.biz-conn { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--pp-gray-700); padding: 10px 14px; border: 1px solid var(--pp-gray-200); border-radius: var(--radius-md); background: var(--pp-white); }
+.biz-conn:empty { display: none; }
+.biz-conn-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--pp-gray-500); flex: none; }
+.biz-conn.ok .biz-conn-dot { background: var(--pp-green); }
+.biz-conn.warn .biz-conn-dot { background: #DC6803; }
+.biz-conn.bad .biz-conn-dot { background: var(--pp-red); }
+.biz-conn.warn { background: #FFFAEB; border-color: #FEDF89; }
+.biz-conn.bad { background: #FDECEA; border-color: #F5B5A8; }
+.biz-conn-text { flex: 1; min-width: 260px; line-height: 1.5; }
+.biz-conn-text strong { color: var(--pp-gray-900); }
+.biz-conn-problem { display: block; color: var(--pp-gray-900); }
+
+.biz-sources { display: flex; gap: 8px; flex-wrap: wrap; }
+.biz-source {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--pp-gray-700);
+  background: var(--pp-white); border: 1px solid var(--pp-gray-300); border-radius: var(--radius-pill); padding: 5px 14px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.biz-source span { font-size: 12px; font-weight: 600; color: var(--pp-gray-500); font-variant-numeric: tabular-nums; }
+.biz-source:hover { border-color: var(--pp-blue-primary); }
+.biz-source.active { color: var(--pp-white); background: var(--pp-blue-deep); border-color: var(--pp-blue-deep); }
+.biz-source.active span { color: rgba(255,255,255,.75); }
+
+.biz-pill.agent { background: #EDE9FE; color: #5B21B6; }
+.biz-source-name { color: var(--pp-gray-700); }
+.biz-neg { color: var(--pp-red); }
+.biz-tx-avatar.agent { background: #EDE9FE; color: #5B21B6; }
+
+/* ---------- Native AG Grid transactions grid ---------- */
+.biz-grid-main { height: 680px; }
+.biz-grid .ag-row:not(.ag-row-pinned) { cursor: default; }
+.biz-sample { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--pp-gray-500); background: var(--pp-gray-100); border: 1px solid var(--pp-gray-200); padding: 0 6px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+.biz-tag { font-size: 12px; font-weight: 600; color: #0B5394; background: #E8F1F8; padding: 1px 9px; border-radius: 999px; }
+.biz-briefing-wrap { height: 100%; display: flex; align-items: center; padding: 0 16px; background: #F3F9FD; cursor: pointer; border-bottom: 1px solid var(--pp-gray-200); }
+.biz-briefing-wrap:hover { background: #EBF5FB; }
+.biz-briefing-wrap .biz-briefing { width: 100%; max-width: none; }
+.biz-master { padding: 14px 20px 16px 56px; background: #F8FBFE; display: flex; flex-direction: column; gap: 10px; }
+.biz-master-head { display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.5; white-space: normal; }
+.biz-master-grid { max-width: 720px; }
+.biz-filter-note { font-size: 13px; color: var(--pp-blue-deep); background: var(--pp-blue-light); padding: 8px 12px; border-radius: var(--radius-sm); margin-top: -8px; }
+.biz-filter-note .btn-text-link { margin-left: 8px; }
+/* The nested items grid sizes to its rows (no empty overlay area under one or two items). */
+.biz-master-grid .ag-layout-auto-height .ag-center-cols-viewport,
+.biz-master-grid .ag-layout-auto-height .ag-center-cols-container,
+.biz-master-grid .ag-layout-auto-height .ag-center-cols-clipper { min-height: 0 !important; }
+
+/* Sync button in the section header (the status box is gone) */
+.biz-section-actions .biz-conn { display: inline-flex; padding: 0; border: 0; background: none; min-width: 0; }
+.biz-section-actions .biz-conn:empty { display: none; }
+.biz-ai-section .section-card-header { align-items: center; }

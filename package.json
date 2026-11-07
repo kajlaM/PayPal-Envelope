@@ -37,6 +37,8 @@
     "@bryntum/scheduler-enterprise": "8.0.0",
     "@bryntum/taskboard-enterprise": "8.0.0",
     "ag-charts-community": "14.2.0",
-    "ag-grid-community": "36.2.0"
+    "ag-charts-enterprise": "14.2.0",
+    "ag-grid-community": "36.2.0",
+    "ag-grid-enterprise": "36.2.0"
   }
 }

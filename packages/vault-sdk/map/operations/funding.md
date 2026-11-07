@@ -186,7 +186,7 @@ Accessor: `client.funding` · Source: `src/resources/funding.ts` · 10 operation
 
 ### syncFundRequest
 
-- **Signature**: `syncFundRequest(request: Funding.SyncFundRequestRequest, options?: RequestOptions): ApiPromise<Record<string, unknown>, Funding.SyncFundRequestError>`
+- **Signature**: `syncFundRequest(request: Funding.SyncFundRequestRequest, options?: RequestOptions): ApiPromise<Record<string, unknown> | null, Funding.SyncFundRequestError>`
 - **Wire**: `POST /api/fund-requests/{id}/sync`
 - **Auth**: none — public; no credential is sent
 - **Request body**: none — no `Content-Type` header is sent

@@ -31,7 +31,7 @@
             <button type="button" class="nav-item active" data-tab="home">Home</button>
             <button type="button" class="nav-item" data-tab="activity">Activity</button>
             <button type="button" class="nav-item" data-tab="get-paid">Pay &amp; Get Paid</button>
-            <button type="button" class="nav-item" data-tab="ai-sales">AI agent sales</button>
+            <button type="button" class="nav-item" data-tab="ai-sales">Transactions</button>
             <button type="button" class="nav-item" data-tab="reports">Reports</button>
             <button type="button" class="nav-item" data-tab="help">Help</button>
           </nav>
@@ -124,7 +124,7 @@
             <div class="section-card-header">
               <div>
                 <h2 class="section-card-title">Recent Activity</h2>
-                <p class="section-card-desc">Payments your business received</p>
+                <p class="section-card-desc">Money in and out of your PayPal account</p>
               </div>
               <div class="header-action-group">
                 <button type="button" class="btn-text-link" data-tab-link="ai-sales">View all</button>
@@ -141,10 +141,10 @@
           <article class="dash-card biz-ai-teaser">
             <div class="promo-badge">NEW · AI AGENTS</div>
             <h3 class="section-card-title-sm">AI agent sales</h3>
-            <p class="section-card-desc">Shopping agents buy from your shop for their customers. See every order, and every sale they could not complete.</p>
+            <p class="section-card-desc">Shopping agents buy from your shop for their customers. See every payment they make to you, live.</p>
             <div class="biz-teaser-stats">
               <div><span class="biz-muted">This week</span><strong id="teaserWeek">–</strong></div>
-              <div><span class="biz-muted">Missed</span><strong id="teaserMissed" class="biz-warn-text">–</strong></div>
+              <div><span class="biz-muted">Payments</span><strong id="teaserCount">–</strong></div>
             </div>
             <button type="button" class="btn btn-primary-sm" data-tab-link="ai-sales">Open AI agent sales</button>
           </article>
@@ -173,7 +173,7 @@
           <!-- Seller protection -->
           <article class="dash-card security-widget-card">
             <h3 class="section-card-title-sm">Seller Protection</h3>
-            <p class="section-card-desc">Eligible sales are covered against claims and chargebacks. AI-agent purchases paid with PayPal Checkout include buyer and seller protection.</p>
+            <p class="section-card-desc">Eligible sales are covered against claims and chargebacks. AI-agent payments made with PayPal Checkout include buyer and seller protection.</p>
           </article>
         </aside>
       </div>
@@ -182,66 +182,138 @@
       <article class="dash-card biz-ai-section" id="aiSalesSection">
         <div class="section-card-header">
           <div>
-            <h2 class="section-card-title">AI agent sales</h2>
-            <p class="section-card-desc">Every payment a PayPalVault agent made to your business, and every one it wanted to make but couldn&rsquo;t. Customers are anonymised; you never see their wallets.</p>
+            <h2 class="section-card-title">Transactions &amp; AI agent sales</h2>
           </div>
-          <div class="biz-storefronts" id="bizStorefronts" aria-label="Your shop"></div>
+          <div class="biz-section-actions">
+            <span class="biz-conn" id="bizConn"></span>
+            <button type="button" class="btn btn-outline biz-small" id="bizAcctOpen" title="Report of every transaction with gross, fee and net">Accountant report</button>
+            <button type="button" class="btn btn-primary biz-small" id="bizTvOpen" title="Full-screen live view of incoming payments">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+              TV mode
+            </button>
+          </div>
         </div>
 
+        <!-- Stampede alert: shown when payments for one product spike (alerts only; nothing is sent to any agent) -->
+        <div class="biz-stampede-banner hidden" id="bizStampedeBanner" role="alert"></div>
+
         <section class="biz-kpis" aria-label="Summary">
-          <article class="biz-kpi"><span class="biz-kpi-label">AI-agent revenue</span><strong id="kpiRevenue">–</strong><span class="biz-kpi-sub" id="kpiRevenueSub"></span></article>
-          <article class="biz-kpi"><span class="biz-kpi-label">Orders</span><strong id="kpiOrders">–</strong><span class="biz-kpi-sub" id="kpiOrdersSub"></span></article>
-          <article class="biz-kpi biz-kpi-warn"><span class="biz-kpi-label">Missed sales</span><strong id="kpiMissed">–</strong><span class="biz-kpi-sub" id="kpiMissedSub"></span></article>
-          <article class="biz-kpi"><span class="biz-kpi-label">Agent conversion</span><strong id="kpiConversion">–</strong><span class="biz-kpi-sub">orders ÷ attempts</span></article>
+          <article class="biz-kpi"><span class="biz-kpi-label">Sales</span><strong id="kpiRevenue">–</strong><span class="biz-kpi-sub" id="kpiRevenueSub"></span></article>
+          <article class="biz-kpi"><span class="biz-kpi-label">Net after fees &amp; refunds</span><strong id="kpiNet">–</strong><span class="biz-kpi-sub" id="kpiNetSub"></span></article>
+          <article class="biz-kpi"><span class="biz-kpi-label">From AI agents</span><strong id="kpiAgent">–</strong><span class="biz-kpi-sub" id="kpiAgentSub"></span></article>
+          <article class="biz-kpi"><span class="biz-kpi-label">Transactions</span><strong id="kpiOrders">–</strong><span class="biz-kpi-sub" id="kpiOrdersSub"></span></article>
         </section>
 
-        <section class="biz-charts" id="bizCharts" aria-label="Charts">
+        <!-- AG Grid cross-filter charts: made by the grid from its own rows. Click a bar or slice and the
+             grid, the KPIs and the other charts filter to it; click again to clear. -->
+        <section class="biz-charts" id="bizCharts" aria-label="Cross-filter charts">
           <article class="biz-chart-card">
-            <header><h3>AI-agent revenue per day</h3><span class="biz-muted" id="chartRevenueNote"></span></header>
+            <header><h3>Sales per day</h3><span class="biz-muted">AI agents vs other</span></header>
             <div class="biz-chart" id="chartRevenue"></div>
           </article>
           <article class="biz-chart-card">
-            <header><h3>Top products</h3><span class="biz-muted">by revenue</span></header>
-            <div class="biz-chart" id="chartProducts"></div>
+            <header><h3>Sales by source</h3><span class="biz-muted">click a slice to filter</span></header>
+            <div class="biz-chart" id="chartSource"></div>
           </article>
           <article class="biz-chart-card">
-            <header><h3>Agent attempts</h3><span class="biz-muted" id="chartOutcomeNote">bought vs. lost, and why</span></header>
-            <div class="biz-chart" id="chartOutcome"></div>
+            <header><h3>Top items</h3><span class="biz-muted">click a bar to filter</span></header>
+            <div class="biz-chart" id="chartProducts"></div>
           </article>
         </section>
+        <p class="biz-filter-note hidden" id="bizFilterNote" role="status"></p>
 
         <section class="biz-panel">
           <div class="biz-tabs" role="tablist">
-            <button type="button" role="tab" class="biz-tab active" data-tab="orders" aria-selected="true">AI-agent orders <span class="biz-count" id="countOrders">0</span></button>
-            <button type="button" role="tab" class="biz-tab" data-tab="missed" aria-selected="false">Missed sales <span class="biz-count biz-count-warn" id="countMissed">0</span></button>
+            <button type="button" role="tab" class="biz-tab active" data-tab="orders" aria-selected="true">All transactions <span class="biz-count" id="countOrders">0</span></button>
+            <button type="button" role="tab" class="biz-tab" data-tab="together" aria-selected="false">Bought together <span class="biz-count" id="countTogether">0</span></button>
+            <button type="button" role="tab" class="biz-tab" data-tab="stampede" aria-selected="false">Stampede watch <span class="biz-count" id="countStampede">0</span></button>
           </div>
 
+          <div id="bizListPanel" class="biz-subpanel">
           <form class="biz-ask" id="bizAsk" autocomplete="off">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.8L20 10l-5 3.6L16.5 20 12 16.4 7.5 20 9 13.6 4 10l6.1-1.2z"/></svg>
             <input type="text" id="bizAskInput" placeholder="Ask the grid… e.g. “orders this week over $40”" aria-label="Ask the grid in plain English">
             <button type="submit" class="btn btn-primary" id="bizAskBtn">Ask</button>
           </form>
-          <div class="biz-ask-examples" id="bizAskExamples"></div>
+          <div class="biz-sources" id="bizSources" role="group" aria-label="Show">
+            <button type="button" class="biz-source active" data-source="all">All <span id="srcAll">0</span></button>
+            <button type="button" class="biz-source" data-source="agent">AI agents <span id="srcAgent">0</span></button>
+            <button type="button" class="biz-source" data-source="other">Other PayPal <span id="srcOther">0</span></button>
+            <button type="button" class="biz-source" data-source="out">Money out <span id="srcOut">0</span></button>
+          </div>
           <p class="biz-ask-result hidden" id="bizAskResult" role="status"></p>
-
-          <div class="biz-insights hidden" id="bizInsights" aria-label="What agents wanted"></div>
 
           <div class="biz-toolbar">
             <input type="search" class="biz-search" id="bizSearch" placeholder="Quick search" aria-label="Quick search">
-            <label class="biz-group">Group by
-              <select id="bizGroupBy"></select>
+            <label class="biz-group">View
+              <select id="bizView" aria-label="Saved views"></select>
+            </label>
+            <button type="button" class="btn btn-outline biz-small" id="bizSaveView" title="Save the grid as it is now (columns, grouping, pivot, filters, sort)">Save view</button>
+            <label class="biz-group">Chart
+              <select id="bizChartPreset" aria-label="Make a chart from the grid"></select>
             </label>
             <span class="biz-toolbar-spacer"></span>
+            <button type="button" class="btn btn-outline biz-small hidden" id="bizBulkReconcile">Mark reconciled</button>
             <button type="button" class="btn btn-outline biz-small" id="bizReset">Reset view</button>
+            <button type="button" class="btn btn-outline biz-small" id="bizExportXlsx">Export Excel</button>
             <button type="button" class="btn btn-outline biz-small" id="bizExport">Export CSV</button>
           </div>
 
           <div class="biz-grid-wrap">
-            <div id="gridOrders" class="biz-grid"></div>
-            <div id="gridMissed" class="biz-grid hidden"></div>
-            <div id="gridSummary" class="biz-grid hidden"></div>
+            <div id="gridOrders" class="biz-grid biz-grid-main"></div>
           </div>
-          <p class="biz-hint biz-muted" id="bizHint">Click a row to see why the agent bought it.</p>
+          </div>
+
+          <!-- Bought together: product pairs, counts only -->
+          <div id="bizTogetherPanel" class="biz-subpanel hidden">
+            <div class="biz-subpanel-head">
+              <p class="biz-muted biz-privacy-note" id="bizTogetherNote">Product pairs paid for by the same buyer. Counts only: customers are never shown here.</p>
+              <span class="biz-toolbar-spacer"></span>
+              <button type="button" class="btn btn-outline biz-small" id="bizTogetherChart">Chart pairs</button>
+            </div>
+            <div id="gridTogether" class="biz-grid biz-grid-short"></div>
+          </div>
+
+          <!-- Stampede watch: payment speed per product (alerts only) -->
+          <div id="bizStampedePanel" class="biz-subpanel hidden">
+            <div class="biz-subpanel-head">
+              <p class="biz-muted biz-privacy-note">Watches the payments you receive. A sudden rush on one product, or payments far below its usual price, usually means a pricing mistake in your shop. It only alerts you: it never contacts, slows or blocks any agent.</p>
+            </div>
+            <div class="biz-toolbar">
+              <label class="biz-group">Window
+                <select id="bizStampedeWindow">
+                  <option value="5">Last 5 min</option>
+                  <option value="10" selected>Last 10 min</option>
+                  <option value="30">Last 30 min</option>
+                  <option value="60">Last hour</option>
+                  <option value="1440">Last 24 hours</option>
+                </select>
+              </label>
+              <label class="biz-group">Alert at
+                <input type="number" id="bizStampedeThreshold" class="biz-number" min="2" max="500" value="5" aria-label="Payments for one product in the window that count as a stampede">
+                payments
+              </label>
+              <label class="biz-group">Price drop below
+                <input type="number" id="bizStampedeDrop" class="biz-number" min="10" max="95" step="5" value="60" aria-label="Percent of the usual price that counts as a price drop">
+                % of usual
+              </label>
+              <span class="biz-toolbar-spacer"></span>
+              <button type="button" class="btn btn-outline biz-small" id="bizStampedeChart">Chart activity</button>
+            </div>
+            <div id="gridStampede" class="biz-grid biz-grid-short"></div>
+          </div>
+
+          <!-- Integrated Charts (AG Grid Enterprise): charts made from the grids land here and stay linked to them -->
+          <section class="biz-chart-dock hidden" id="bizChartDock" aria-label="Chart from the grid">
+            <header>
+              <div>
+                <h3 id="bizChartTitle">Chart</h3>
+                <p class="biz-muted">Linked to the grid: filter or sort the grid and the chart follows. Use the chart menu to change type or download.</p>
+              </div>
+              <button type="button" class="btn btn-outline biz-small" id="bizChartClose">Close chart</button>
+            </header>
+            <div class="biz-chart-host" id="bizChartHost"></div>
+          </section>
         </section>
       </article>
     </main>
@@ -249,8 +321,64 @@
 
   <div class="biz-toast hidden" id="bizToast" role="status"></div>
 
-  <script src="/vendor/ag-grid.js"></script>
-  <script src="/vendor/ag-charts.js"></script>
+  <!-- ================= TV MODE: full-screen live view of payments received ================= -->
+  <div class="biz-tv hidden" id="bizTv" role="dialog" aria-modal="true" aria-label="Live payments, TV mode">
+    <header class="biz-tv-head">
+      <div class="biz-tv-brand">
+        <span class="biz-tv-shop" id="bizTvShop">Your shop</span>
+        <span class="biz-live" id="bizTvLive"><span class="biz-live-dot"></span>Live</span>
+      </div>
+      <div class="biz-tv-clock" id="bizTvClock">--:--</div>
+      <button type="button" class="biz-tv-exit" id="bizTvExit">Exit TV mode <kbd>Esc</kbd></button>
+    </header>
+    <div class="biz-tv-alert hidden" id="bizTvAlert" role="alert"></div>
+    <section class="biz-tv-kpis">
+      <article><span>Today</span><strong id="tvToday">$0.00</strong><em id="tvTodaySub">0 payments</em></article>
+      <article><span>Last 60 min</span><strong id="tvHour">$0.00</strong><em id="tvHourSub">0 payments</em></article>
+      <article><span>Top product today</span><strong id="tvTop" class="biz-tv-top">–</strong><em id="tvTopSub"></em></article>
+      <article><span>Last payment</span><strong id="tvLast">–</strong><em id="tvLastSub"></em></article>
+    </section>
+    <div class="biz-tv-pop hidden" id="bizTvPop" aria-live="polite"></div>
+    <div id="gridTv" class="biz-tv-grid"></div>
+    <footer class="biz-tv-foot" id="bizTvFoot">Payments received, newest first. AI-agent payments are marked. Customers are not shown on this screen.</footer>
+  </div>
+
+  <!-- ================= ACCOUNTANT REPORT: finance-only export ================= -->
+  <dialog class="biz-dialog" id="bizAcct" aria-labelledby="bizAcctTitle">
+    <form method="dialog" class="biz-dialog-body" id="bizAcctForm">
+      <h2 id="bizAcctTitle">Accountant report</h2>
+      <p class="biz-muted">Every transaction on your PayPal account: date, transaction id, type, source, item, payer, gross, fee, net and status. AI-agent buyers stay anonymous.</p>
+      <label class="biz-field">Period
+        <select id="bizAcctPeriod">
+          <option value="this-month">This month</option>
+          <option value="last-month">Last month</option>
+          <option value="30">Last 30 days</option>
+          <option value="all" selected>All time</option>
+          <option value="view">What the Orders grid shows now</option>
+        </select>
+      </label>
+      <fieldset class="biz-field">
+        <legend>Format</legend>
+        <label><input type="radio" name="bizAcctFormat" value="xlsx" checked> Excel (.xlsx): Transactions + Daily totals sheets</label>
+        <label><input type="radio" name="bizAcctFormat" value="csv"> CSV: transactions only</label>
+      </fieldset>
+      <p class="biz-acct-preview" id="bizAcctPreview"></p>
+      <div class="biz-dialog-actions">
+        <button type="button" class="btn btn-outline biz-small" id="bizAcctCancel">Cancel</button>
+        <button type="submit" class="btn btn-primary biz-small" id="bizAcctGo">Download</button>
+      </div>
+    </form>
+  </dialog>
+  <!-- Off-screen grids that only feed the accountant workbook -->
+  <div class="biz-offscreen" aria-hidden="true">
+    <div id="gridAcct" style="height:200px;width:900px"></div>
+    <div id="gridAcctDays" style="height:200px;width:600px"></div>
+  </div>
+
+  <!-- AG Charts Enterprise first, then AG Grid Enterprise: the grid picks up window.agCharts for Integrated Charts -->
+  <script src="/biz/ag-license.js"></script>
+  <script src="/vendor/ag-charts-enterprise.js"></script>
+  <script src="/vendor/ag-grid-enterprise.js"></script>
   <script src="business.js"></script>
 </body>
 </html>
