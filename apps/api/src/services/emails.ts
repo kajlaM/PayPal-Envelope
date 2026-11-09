@@ -159,7 +159,7 @@ export function buildEmail(input: EmailInput): Email {
 
     case 'NEEDS_HUMAN': {
       const p = input.purchase;
-      s = subject(`✋ Approve ${p.item}: ${usd(p.amountCents)} at ${p.merchant}?`);
+      s = subject(`Approve ${p.item}: ${usd(p.amountCents)} at ${p.merchant}?`);
       b = {
         headline: 'Your approval is needed',
         intro: `The agent wants to buy this, but your rules ask you first because ${reasonText(input.reasons)}.`,
@@ -177,7 +177,7 @@ export function buildEmail(input: EmailInput): Email {
 
     case 'OPTIONS_READY': {
       const n = input.options.length;
-      s = subject(`👉 Pick one: ${n} option${n === 1 ? '' : 's'} ready`);
+      s = subject(`Pick one: ${n} option${n === 1 ? '' : 's'} ready`);
       b = {
         headline: 'Your options are ready',
         intro: `${input.summary ? `${input.summary} ` : ''}This vault is set to "Ask me", so nothing is bought until you pick one.`,
@@ -287,7 +287,7 @@ export function buildEmail(input: EmailInput): Email {
     }
 
     case 'SAVINGS_GOAL_REACHED':
-      s = subject(`🎉 Goal reached: ${usd(v.budgetCents)} saved`);
+      s = subject(`Goal reached: ${usd(v.budgetCents)} saved`);
       b = {
         headline: 'You reached your goal',
         intro: `"${v.name}" now holds the full ${usd(v.budgetCents)}. No more payments will be taken. ${input.willShop ? 'The AI agent starts shopping now, within your rules:' : 'The money stays in the vault until you close it or it ends.'}`,
@@ -297,7 +297,7 @@ export function buildEmail(input: EmailInput): Email {
       break;
 
     case 'SAVINGS_PAYMENT_FAILED':
-      s = subject(input.paused ? '⚠️ Savings plan paused: payment failed' : '⚠️ Savings payment failed: retrying tomorrow');
+      s = subject(input.paused ? 'Savings plan paused: payment failed' : 'Savings payment failed: retrying tomorrow');
       b = {
         headline: input.paused ? 'Your savings plan is paused' : 'A savings payment failed',
         intro: `PayPalVault could not take this payment from your PayPal: ${input.reason} ${input.paused ? 'No more payments are taken until you resume the plan.' : 'It is tried again tomorrow.'}`,
@@ -309,7 +309,7 @@ export function buildEmail(input: EmailInput): Email {
       break;
 
     case 'PAYOUT_FAILED':
-      s = subject(input.refund ? `⚠️ Refund of ${usd(input.amountCents)} failed` : `⚠️ Payment of ${usd(input.amountCents)} to ${input.to} failed`);
+      s = subject(input.refund ? `Refund of ${usd(input.amountCents)} failed` : `Payment of ${usd(input.amountCents)} to ${input.to} failed`);
       b = {
         headline: input.refund ? 'A refund failed' : 'A payment failed',
         intro: `PayPal did not complete ${input.refund ? 'the refund to your PayPal' : `the payment to ${input.to}`}. The money is safe: it is back in the vault.`,
@@ -320,7 +320,7 @@ export function buildEmail(input: EmailInput): Email {
       break;
 
     case 'PAYPAL_MISMATCH':
-      s = subject(`⚠️ PayPal shows something different for ${input.payment}`);
+      s = subject(`PayPal shows something different for ${input.payment}`);
       b = {
         headline: 'Please check this payment',
         intro: 'PayPalVault checks every vault payment against PayPal\'s own records. For this one, PayPal says something different from the vault.',

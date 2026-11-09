@@ -243,7 +243,7 @@ async function draftPolicy(amountInput: unknown, descriptionInput: unknown, cont
   const amount = Math.round(Number(amountInput) * 100) / 100;
   const description = String(descriptionInput ?? '').trim();
   if (!(amount >= 1) || amount > 10_000) throw new HttpError(400, 'INVALID_AMOUNT', { message: 'Enter an amount between $1 and $10,000.' });
-  if (description.length < 5) throw new HttpError(400, 'DESCRIPTION_TOO_SHORT', { message: 'Describe what the vault is for.' });
+  if (description.length < 5) throw new HttpError(400, 'DESCRIPTION_TOO_SHORT', { message: 'Describe what the envelope is for.' });
 
   const text = `${description}. Vault budget: $${amount.toFixed(2)}.`;
   const draft = await vaultApi.compilePolicy(text);
@@ -263,14 +263,14 @@ async function draftPolicy(amountInput: unknown, descriptionInput: unknown, cont
 function setPayment(policy: any, payment: any, warnings: string[] = []) {
   if (payment?.mode === 'NOW') {
     if (policy.vault_type === 'SAVINGS') {
-      throw new HttpError(400, 'SAVINGS_PAID_OVER_TIME', { message: 'A savings vault is paid in bit by bit: pick "Pay over time".' });
+      throw new HttpError(400, 'SAVINGS_PAID_OVER_TIME', { message: 'A savings envelope is paid in bit by bit: pick "Pay over time".' });
     }
     delete policy.savings;
   } else if (payment?.mode === 'OVER_TIME') {
-    if (policy.vault_type === 'UTILITY') throw new HttpError(400, 'BILLS_PAID_NOW', { message: 'Bill vaults are paid in full now.' });
+    if (policy.vault_type === 'UTILITY') throw new HttpError(400, 'BILLS_PAID_NOW', { message: 'Bill envelopes are paid in full now.' });
     const amount = Math.round(Number(payment.amount) * 100) / 100;
     if (!(amount > 0)) throw new HttpError(400, 'INVALID_PAYMENT_AMOUNT', { message: 'Enter how much to pay in each time.' });
-    if (amount >= policy.allocated_budget) throw new HttpError(400, 'PAYMENT_NOT_SMALLER', { message: 'Each payment must be smaller than the vault amount (or pay it all now).' });
+    if (amount >= policy.allocated_budget) throw new HttpError(400, 'PAYMENT_NOT_SMALLER', { message: 'Each payment must be smaller than the envelope amount (or pay it all now).' });
     if (!SAVINGS_INTERVALS.includes(payment.every)) throw new HttpError(400, 'INVALID_INTERVAL', { message: 'Pick how often to pay in.' });
     policy.savings = { amount_per_payment: amount, every: payment.every };
   }
@@ -540,14 +540,14 @@ app.post('/me/vaults', async (req, res) => {
 
 async function createVault(account: Account, req: Request): Promise<Created> {
   const funding: FundingMethod = req.body?.funding ?? 'PAYPAL';
-  if (!FUNDING_METHODS.includes(funding)) throw new HttpError(400, 'INVALID_FUNDING', { message: 'Pick how to fund the vault.' });
+  if (!FUNDING_METHODS.includes(funding)) throw new HttpError(400, 'INVALID_FUNDING', { message: 'Pick how to fund the envelope.' });
   const policy = req.body?.policy;
   if (!policy || typeof policy !== 'object' || !policy.rules || !policy.vault_name || !(Number(policy.allocated_budget) > 0)) {
     throw new HttpError(400, 'INVALID_POLICY', { message: 'Go back and let the AI write the rules first.' });
   }
   const plan = policy.savings;
   if (plan && funding !== 'PAYPAL') {
-    throw new HttpError(400, 'SAVINGS_PAID_BY_OWNER', { message: 'A vault paid in over time is paid from your own PayPal.' });
+    throw new HttpError(400, 'SAVINGS_PAID_BY_OWNER', { message: 'An envelope paid in over time is paid from your own PayPal.' });
   }
   if (funding === 'FRIEND' && !String(req.body?.friendEmail ?? '').trim()) {
     throw new HttpError(400, 'FRIEND_EMAIL_REQUIRED', { message: "Enter your friend's PayPal email." });
@@ -567,7 +567,7 @@ async function createVault(account: Account, req: Request): Promise<Created> {
   });
   if (twin) {
     throw new HttpError(409, 'DUPLICATE_VAULT', {
-      message: `You created "${twin.name}" a moment ago, so no second one was made. Open it from your vaults.`,
+      message: `You created "${twin.name}" a moment ago, so no second one was made. Open it from your envelopes.`,
       vaultId: twin.id,
     });
   }
@@ -668,13 +668,13 @@ app.get('/me/vaults/:id', async (req, res) => {
 /** The vault, if it belongs to this customer and still waits for its money. */
 async function unfundedVault(account: Account, vaultId: string) {
   const vault = await ownVault(account, vaultId);
-  if (vault.status !== 'PENDING_FUNDING') throw new HttpError(409, 'VAULT_ALREADY_FUNDED', { message: 'This vault already has its money.' });
+  if (vault.status !== 'PENDING_FUNDING') throw new HttpError(409, 'VAULT_ALREADY_FUNDED', { message: 'This envelope already has its money.' });
   return vault;
 }
 
 function noOpenRequest(vault: { fundRequests?: { status: string; payerEmail: string }[] }) {
   const open = vault.fundRequests?.find((r) => r.status === 'OPEN');
-  if (open) throw new HttpError(409, 'FRIEND_REQUEST_OPEN', { message: `${open.payerEmail} was asked to fund this vault. Cancel that request first.` });
+  if (open) throw new HttpError(409, 'FRIEND_REQUEST_OPEN', { message: `${open.payerEmail} was asked to fund this envelope. Cancel that request first.` });
 }
 
 // Pay with PayPal: from the saved PayPal account, no popup. Moves money, so it needs the password.
@@ -684,7 +684,7 @@ app.post('/me/vaults/:id/fund/paypal', async (req, res) => {
   const vault = await unfundedVault(account, req.params.id);
   noOpenRequest(vault);
   if (vault.savingsPerPaymentCents !== null && vault.savingsPerPaymentCents !== undefined) {
-    throw new HttpError(409, 'SAVINGS_PLAN', { message: 'This vault is paid in over time: use "Pay now" in its savings plan.' });
+    throw new HttpError(409, 'SAVINGS_PLAN', { message: 'This envelope is paid in over time: use "Pay now" in its savings plan.' });
   }
   const link = await linkFor(account, req);
   const amountCents = vault.budgetCents - vault.balanceCents;
@@ -775,7 +775,7 @@ app.post('/me/requests/:id/check', async (req, res) => {
 // Step 1: new amount + description -> AI writes the new rules. Says how much money would move.
 app.post('/me/vaults/:id/policy/preview', async (req, res) => {
   const vault = await ownVault(loggedIn(req), req.params.id);
-  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active vault can be changed.' });
+  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active envelope can be changed.' });
   const draft = await draftPolicy(req.body?.amount, req.body?.description, req.body?.control);
   draft.policy.savings = vault.policy.savings; // a payment plan cannot be changed (PayPalVault keeps it too)
   const check = await vaultApi.changePolicy(vault.id, { policy: draft.policy, sourceText: draft.sourceText, dryRun: true });
@@ -813,7 +813,7 @@ app.post('/me/vaults/:id/policy', async (req, res) => {
 
 app.post('/me/vaults/:id/agent', async (req, res) => {
   const vault = await ownVault(loggedIn(req), req.params.id);
-  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active vault can run its agent.' });
+  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active envelope can run its agent.' });
   startAgent(vault.id);
   res.status(202).json({ started: true });
 });
@@ -894,7 +894,7 @@ app.post('/me/vaults/:id/control', async (req, res) => {
   const account = loggedIn(req);
   if (!passwordOk(account, req.body?.password)) throw new HttpError(401, 'WRONG_PASSWORD', { message: 'Wrong password.' });
   const vault = await ownVault(account, req.params.id);
-  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active vault can be changed.' });
+  if (vault.status !== 'ACTIVE') throw new HttpError(409, 'VAULT_NOT_ACTIVE', { message: 'Only an active envelope can be changed.' });
   if (!CONTROL_MODES.includes(req.body?.control?.mode)) throw new HttpError(400, 'INVALID_CONTROL', { message: 'Pick Ask me, Ask above an amount, or Autopilot.' });
   const policy = structuredClone(vault.policy);
   setControl(policy, req.body.control);

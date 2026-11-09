@@ -222,7 +222,7 @@
       <div><span class="biz-muted">${escapeHtml(r.type)} · ${escapeHtml(fmtDate(r.at))}</span>
         <strong>${usd(r.amount)}</strong> gross${r.fee != null ? ` · fee ${usd(r.fee)} · <strong>${usd(r.net)}</strong> net` : ' · fee not reported yet'}</div>
       <div>${r.agent ? `<span class="biz-pill agent">✦ AI agent</span> via ${escapeHtml(r.paidVia)} · ${escapeHtml(r.customer)} (anonymous buyer)` : `${escapeHtml(r.source)} · ${escapeHtml(r.customer || '–')}${r.payerEmail ? ` · ${escapeHtml(r.payerEmail)}` : ''}`}</div>
-      <div class="biz-muted">${r.paypal === 'Confirmed' ? '✅' : r.paypal === 'Differs' ? '⚠️' : '⏳'} ${escapeHtml(r.paypalNote)} · ID ${escapeHtml(r.paypalRef || '–')}${r.invoiceId ? ` · invoice ${escapeHtml(r.invoiceId)}` : ''}${related(r)}</div>
+      <div class="biz-muted">${escapeHtml(r.paypalNote)} · ID ${escapeHtml(r.paypalRef || '–')}${r.invoiceId ? ` · invoice ${escapeHtml(r.invoiceId)}` : ''}${related(r)}</div>
     </div>`;
   const related = (r) => {
     const refund = data.orders.filter((o) => o.relatedTo === r.id);
@@ -725,7 +725,7 @@
       parts.push(`<strong>Yesterday</strong> no sales${b.last ? ` · last one ${escapeHtml(fmtDate(b.last.at))}, ${usd(b.last.amount)}` : ''}`);
     }
     const today = `Today so far: <strong>${b.todayCount}</strong> · <strong>${usd(b.todayRevenue)}</strong>`;
-    return `<div class="biz-briefing"><span class="biz-briefing-tag">☀ ${title}</span><span class="biz-briefing-text">${parts.join(' · ')}</span><span class="biz-briefing-today">${today}</span>${b.yCount ? '<span class="biz-briefing-go">View ›</span>' : ''}</div>`;
+    return `<div class="biz-briefing"><span class="biz-briefing-tag">${title}</span><span class="biz-briefing-text">${parts.join(' · ')}</span><span class="biz-briefing-today">${today}</span>${b.yCount ? '<span class="biz-briefing-go">View ›</span>' : ''}</div>`;
   }
 
   function renderBriefing() {
@@ -855,7 +855,7 @@
       ? `<strong>Stampede on ${escapeHtml(shortName(r.product, 48))}</strong>: ${r.inWindow} payments from ${r.buyers} different buyers in the ${escapeHtml(windowLabel)}${r.usual ? ` (usually ${usd(r.usual)}, lowest now ${usd(r.lowest)})` : ''}. Check its price and stock in your shop.`
       : `<strong>Price drop on ${escapeHtml(shortName(r.product, 48))}</strong>: paid ${usd(r.lowest)}, usually ${usd(r.usual)}. Check the price in your shop.`;
     if (alerts.length) {
-      banner.innerHTML = `<span class="biz-stampede-icon" aria-hidden="true">⚠</span><span>${text(alerts[0])}${alerts.length > 1 ? ` <span class="biz-muted">+${alerts.length - 1} more</span>` : ''}</span>
+      banner.innerHTML = `<span>${text(alerts[0])}${alerts.length > 1 ? ` <span class="biz-muted">+${alerts.length - 1} more</span>` : ''}</span>
         <button type="button" class="btn btn-outline biz-small" data-stampede-view>View</button>
         <button type="button" class="btn btn-outline biz-small" data-ack="${escapeHtml(alerts[0].product)}">Mark checked</button>`;
       banner.classList.remove('hidden');
@@ -866,7 +866,7 @@
       const key = `${r.product}:${r.level}`;
       if (!stampede.alerted.has(key)) {
         stampede.alerted.add(key);
-        if (started) { toast(`⚠ ${r.level} on ${shortName(r.product, 40)}`); pulseLive(); }
+        if (started) { toast(`${r.level} on ${shortName(r.product, 40)}`); pulseLive(); }
       }
     }
     renderTvAlert(alerts.length ? text(alerts[0]) : '');
@@ -1028,7 +1028,7 @@
 
   function renderTvAlert(html) {
     const el = $('bizTvAlert');
-    el.innerHTML = html ? `⚠ ${html}` : '';
+    el.innerHTML = html ? `${html}` : '';
     el.classList.toggle('hidden', !html);
   }
 

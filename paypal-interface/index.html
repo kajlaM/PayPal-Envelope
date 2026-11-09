@@ -117,7 +117,7 @@
             <button type="button" class="nav-item active" data-tab="summary">Home</button>
             <button type="button" class="nav-item" data-tab="send-request">Send &amp; Request</button>
             <button type="button" class="nav-item" data-tab="wallet">Wallet</button>
-            <button type="button" class="nav-item" data-tab="vaults">Vaults</button>
+            <button type="button" class="nav-item" data-tab="vaults">Envelopes</button>
             <button type="button" class="nav-item" data-tab="activity">Activity</button>
             <button type="button" class="nav-item" data-tab="help">Help</button>
           </nav>
@@ -373,12 +373,11 @@
           <article class="dash-card vaults-section-card" id="vaultsSection">
             <div class="section-card-header">
               <div>
-                <h2 class="section-card-title">Vaults</h2>
+                <h2 class="section-card-title">Envelopes</h2>
                 <p class="section-card-desc">Set aside dedicated balances with budgets and spending policies</p>
               </div>
               <div class="header-action-group">
                 <span class="paypal-link-status" id="paypalLinkStatus"></span>
-                <span class="c3-total hidden" id="c3Total"></span>
                 <button type="button" class="btn-text-link" id="vaultCalendarBtn">Calendar</button>
                 <button type="button" class="btn btn-primary-sm" id="createVaultBtn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -392,12 +391,12 @@
 
             <!-- Vaults List / Cards Container -->
             <div class="vaults-grid" id="vaultsContainer">
-              <p class="vaults-empty" id="vaultsStatus">Loading your vaults…</p>
+              <p class="vaults-empty" id="vaultsStatus">Loading your envelopes…</p>
             </div>
 
             <!-- Expired and closed vaults: off the main list, kept here (nothing is deleted) -->
             <details class="vault-history hidden" id="vaultHistory">
-              <summary>Vault history <span class="muted" id="vaultHistoryCount"></span></summary>
+              <summary>Envelope history <span class="muted" id="vaultHistoryCount"></span></summary>
               <ul class="vault-history-list" id="vaultHistoryList"></ul>
             </details>
           </article>
@@ -888,7 +887,7 @@
     <div class="dialog-content">
       <div class="dialog-header">
         <div class="dialog-header-left">
-          <h2 id="createVaultModalTitle" class="dialog-title">Create a Vault</h2>
+          <h2 id="createVaultModalTitle" class="dialog-title">Create an Envelope</h2>
           <p class="dialog-subtitle" id="vaultStepSubtitle"></p>
         </div>
         <button type="button" class="dialog-close-btn" id="closeVaultModalBtn" aria-label="Close dialog">
@@ -899,13 +898,13 @@
       <!-- Step 1: describe -->
       <form id="vaultStepDescribe" class="dialog-form">
         <!-- Buy or Save (hidden when changing a vault) -->
-        <div class="vault-kind-switch" id="vaultKindGroup" role="radiogroup" aria-label="Vault type">
+        <div class="vault-kind-switch" id="vaultKindGroup" role="radiogroup" aria-label="Envelope type">
           <label><input type="radio" name="vaultKind" value="BUY" checked><span>Buy</span></label>
           <label><input type="radio" name="vaultKind" value="SAVE"><span>Save</span></label>
         </div>
 
         <!-- Optional: start from a product page. Channel3 finds the product, its stores and its 90-day price. -->
-        <div class="form-group" id="vaultLinkGroup">
+        <div class="form-group" id="vaultLinkGroup" style="display:none">
           <label for="vaultLinkInput" class="form-label">Start from a product link <span class="form-label-note">optional</span></label>
           <div class="link-lookup-row">
             <input type="url" id="vaultLinkInput" class="form-input" placeholder="Paste a product page, e.g. bestbuy.com/site/…" autocomplete="off">
@@ -920,7 +919,7 @@
             <span class="prefix-symbol">$</span>
             <input type="number" id="vaultAmountInput" class="form-input amt-input" placeholder="50.00" min="1" max="10000" step="0.01" required>
           </div>
-          <span class="vault-input-hint hidden" id="vaultAmountHint"></span> <!-- only when changing a vault -->
+          <span class="vault-input-hint hidden" id="vaultAmountHint"></span> <!-- only when changing an envelope -->
         </div>
 
         <div class="form-group">
@@ -950,7 +949,7 @@
             </label>
             <label class="pay-option">
               <input type="radio" name="vaultFunding" value="FRIEND">
-              <span class="funding-icon friend" aria-hidden="true">✉</span>
+              <span class="funding-icon friend" aria-hidden="true">F</span>
               <span>Ask a friend</span>
             </label>
           </div>
@@ -1003,7 +1002,7 @@
 
         <div class="dialog-actions-row">
           <button type="button" class="btn btn-secondary" id="vaultBackBtn">Back</button>
-          <button type="submit" class="btn btn-primary" id="vaultPayBtn">Pay &amp; create vault</button>
+          <button type="submit" class="btn btn-primary" id="vaultPayBtn">Pay &amp; create envelope</button>
         </div>
       </form>
 
@@ -1012,7 +1011,7 @@
         <ol class="vault-progress-steps" id="vaultProgress"></ol>
         <div class="paylater-box hidden" id="vaultPayLaterBox"></div> <!-- PayPal Pay Later button (app.js) -->
         <div class="dialog-actions-row">
-          <button type="button" class="btn btn-primary hidden" id="vaultDoneBtn">Open vault</button>
+          <button type="button" class="btn btn-primary hidden" id="vaultDoneBtn">Open envelope</button>
         </div>
       </div>
     </div>
@@ -1022,7 +1021,7 @@
     <div class="dialog-content">
       <div class="dialog-header">
         <div class="dialog-header-left">
-          <h2 id="vdTitle" class="dialog-title">Vault</h2>
+          <h2 id="vdTitle" class="dialog-title">Envelope</h2>
           <p class="dialog-subtitle" id="vdSubtitle"></p>
         </div>
         <button type="button" class="dialog-close-btn" id="closeVaultDetailBtn" aria-label="Close dialog">
@@ -1037,7 +1036,7 @@
   <div class="cal-overlay hidden" id="vaultCalendar" role="dialog" aria-modal="true" aria-labelledby="calTitle">
     <div class="cal-sheet">
       <header class="cal-head">
-        <h2 id="calTitle" class="cal-title">Vault calendar</h2>
+        <h2 id="calTitle" class="cal-title">Envelope calendar</h2>
         <span class="cal-status" id="vaultCalendarStatus" role="status"></span>
         <span class="cal-heat-legend" aria-hidden="true">Less <i class="cal-heat-1"></i><i class="cal-heat-2"></i><i class="cal-heat-3"></i><i class="cal-heat-4"></i> More money moved</span>
         <button type="button" class="dialog-close-btn" id="closeVaultCalendarBtn" aria-label="Close calendar">
@@ -1084,7 +1083,7 @@
       <header class="cal-head st-head">
         <div class="tl-heading">
           <h2 id="stTitle" class="cal-title">All activity</h2>
-          <p class="tl-sub" id="stSub">Every payment in and out of your vaults</p>
+          <p class="tl-sub" id="stSub">Every payment in and out of your envelopes</p>
         </div>
         <div class="tl-tabs st-types" id="stTypes" role="tablist" aria-label="Show">
           <button type="button" class="tl-tab active" data-type="">All</button>
@@ -1100,7 +1099,7 @@
         </button>
       </header>
       <div class="st-host" id="activityGrid"></div>
-      <p class="st-hint">Click a row to open that vault's timeline at that moment.</p>
+      <p class="st-hint">Click a row to open that envelope's timeline at that moment.</p>
     </div>
   </div>
 
