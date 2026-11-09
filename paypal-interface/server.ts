@@ -17,6 +17,7 @@ import { PayPalApiError } from '@paypalvault/paypal';
 import { SAVINGS_INTERVALS, savingsExpiry, verifyApprovalLink, type ApprovalAction } from '@paypalvault/policy';
 import { BRYNTUM_OUT, ensureBryntum } from '../scripts/build-bryntum.mjs';
 import { ACCOUNTS, BUSINESS_ACCOUNTS, type Account, type BusinessAccount } from './accounts.ts';
+import { accountFor, baseBusiness, checkSignUpLogin, isBusiness, createSignUp, findSignUp, recipientPasswordOk, setAlertRecipient, signUpPasswordOk, SIGNUP_PREFIX, SignUpError } from './signups.ts';
 import * as business from './business.ts';
 import { businessBalance } from './business-balance.ts';
 import { connection as transactionsConnection, syncTransactions } from './business-transactions.ts';
@@ -57,6 +58,11 @@ function readSession(req: Request): Account | null {
   const given = Buffer.from(mac);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   if (Number(expiry) < Date.now()) return null;
+  if (username.startsWith(SIGNUP_PREFIX)) {
+    // A sign-up: the shared demo customer, shown with their own name (signups.ts).
+    const signup = findSignUp(username.slice(SIGNUP_PREFIX.length));
+    return signup && !isBusiness(signup) ? accountFor(signup) : null;
+  }
   return ACCOUNTS[username] ?? null;
 }
 
@@ -71,7 +77,24 @@ function readBusiness(req: Request): BusinessAccount | null {
   const given = Buffer.from(mac);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   if (Number(expiry) < Date.now()) return null;
-  return BUSINESS_ACCOUNTS[username.slice(BIZ_PREFIX.length)] ?? null;
+  return businessFor(username.slice(BIZ_PREFIX.length))?.biz ?? null;
+}
+
+/** "audiostore", or "su-<id>" for a business sign-up (the shared demo shop, with the person's name). */
+function businessFor(key: string): { biz: BusinessAccount; personName: string | null } | null {
+  if (key.startsWith(SIGNUP_PREFIX)) {
+    const signup = findSignUp(key.slice(SIGNUP_PREFIX.length));
+    return signup && isBusiness(signup) ? { biz: baseBusiness(), personName: signup.name } : null;
+  }
+  const biz = BUSINESS_ACCOUNTS[key];
+  return biz ? { biz, personName: null } : null;
+}
+
+/** The person's own name on a business sign-up's session, else null. */
+function businessPersonName(req: Request): string | null {
+  const raw = req.headers.cookie?.split(';').map((c) => c.trim()).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
+  const username = raw?.split('.')[0] ?? '';
+  return readBusiness(req) && username.startsWith(BIZ_PREFIX) ? businessFor(username.slice(BIZ_PREFIX.length))?.personName ?? null : null;
 }
 
 function loggedInBusiness(req: Request): BusinessAccount {
@@ -86,6 +109,9 @@ function setCookie(req: Request, res: Response, value: string, maxAgeMs: number)
 }
 
 function passwordOk(account: { password: string }, password: unknown) {
+  // Someone who signed up confirms payments with their own password, not the shared account's.
+  const signUp = signUpPasswordOk(account as Account, password);
+  if (signUp !== null) return signUp;
   const given = Buffer.from(String(password ?? ''));
   const expected = Buffer.from(account.password);
   return given.length === expected.length && timingSafeEqual(given, expected);
@@ -397,13 +423,47 @@ app.post('/auth/login', async (req, res) => {
     return res.json({ kind: 'business', name: biz.name, redirect: '/business' });
   }
   const account = ACCOUNTS[login] ?? Object.values(ACCOUNTS).find((a) => a.sandboxEmail.toLowerCase() === login);
-  if (!account || !passwordOk(account, req.body?.password)) {
+  if (!account) {
+    // Someone who signed up on the site (signups.ts) logs in with their own email.
+    const signup = checkSignUpLogin(login, String(req.body?.password ?? ''));
+    if (!signup) return res.status(401).json({ error: 'INVALID_LOGIN', message: 'Wrong email/username or password.' });
+    return logInSignUp(req, res, signup);
+  }
+  if (!passwordOk(account, req.body?.password)) {
     return res.status(401).json({ error: 'INVALID_LOGIN', message: 'Wrong email/username or password.' });
   }
   await startLinkingIfNeeded(account, req, true);
   const me = await profile(account);
+  setAlertRecipient(account, null); // the demo customer itself: alerts go back to ALERT_RECIPIENTS
   setCookie(req, res, sessionCookie(account.username), SESSION_MS);
   res.json(me);
+});
+
+/** Opens the shared demo customer for a sign-up; their alerts now go to their own email. */
+async function logInSignUp(req: Request, res: Response, signup: NonNullable<ReturnType<typeof findSignUp>>) {
+  if (isBusiness(signup)) {
+    // Business sign-up: the shared demo shop's seller dashboard.
+    setCookie(req, res, sessionCookie(`${BIZ_PREFIX}${SIGNUP_PREFIX}${signup.id}`), SESSION_MS);
+    return res.json({ kind: 'business', name: signup.name, redirect: '/business' });
+  }
+  const account = accountFor(signup);
+  await startLinkingIfNeeded(account, req, true);
+  const me = await profile(account);
+  setAlertRecipient(account, signup);
+  setCookie(req, res, sessionCookie(`${SIGNUP_PREFIX}${signup.id}`), SESSION_MS);
+  res.json({ ...me, email: signup.email });
+}
+
+// Sign up: name, email, password (twice). Logs straight in.
+app.post('/auth/signup', async (req, res) => {
+  let signup;
+  try {
+    signup = createSignUp(req.body ?? {});
+  } catch (err) {
+    if (err instanceof SignUpError) return res.status(400).json({ error: 'INVALID_SIGNUP', message: err.message });
+    throw err;
+  }
+  await logInSignUp(req, res, signup);
 });
 
 // PayPal JS SDK settings for the Pay Later button (the client id is public by design).
@@ -1061,7 +1121,7 @@ app.post('/email/act', express.urlencoded({ extended: false, limit: '8kb' }), as
   const again = (error: string, status = 400) => actionPage(res, status, {
     title: ctx.heading, rows: ctx.rows, form: { token, button: ctx.button, needsPassword: ctx.needsPassword, error }, vaultId: ctx.vault.id,
   });
-  if (ctx.needsPassword && !(ctx.owner && passwordOk(ctx.owner, req.body?.password))) return again('Wrong password.', 401);
+  if (ctx.needsPassword && !(ctx.owner && (passwordOk(ctx.owner, req.body?.password) || recipientPasswordOk(ctx.owner, req.body?.password)))) return again('Wrong password.', 401);
 
   const done = (title: string, text: string, tone: 'good' | 'warn' | 'bad' = 'good') => actionPage(res, 200, { title, text, vaultId: ctx.vault.id, tone });
   try {
@@ -1105,7 +1165,7 @@ app.post('/email/act', express.urlencoded({ extended: false, limit: '8kb' }), as
 app.get('/biz/me', async (req, res) => {
   const biz = loggedInBusiness(req);
   const shops = await business.storefronts(biz);
-  res.json({ name: biz.name, username: biz.username, sandboxEmail: biz.sandboxEmail, storefronts: shops.map((s) => s.name) });
+  res.json({ name: biz.name, personName: businessPersonName(req), username: biz.username, sandboxEmail: biz.sandboxEmail, storefronts: shops.map((s) => s.name) });
 });
 
 // Live balance of the business's PayPal sandbox account (read from sandbox.paypal.com).

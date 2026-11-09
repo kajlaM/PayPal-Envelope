@@ -1465,7 +1465,7 @@
     $('bizEmail').title = `PayPal sandbox business account: ${me.sandboxEmail}`;
     $('bizAvatar').textContent = me.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
     const h = new Date().getHours();
-    $('bizGreeting').textContent = `${h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'}, ${me.name}`;
+    $('bizGreeting').textContent = `${h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'}, ${me.personName || me.name}`;
     // A utility gets bill-shaped examples instead of shopping ones.
     if (me.storefronts.length && me.storefronts.every((s) => /utility/i.test(s))) {
       GRIDS.orders.examples = ['invoice payments this month', 'only AI agent payments', 'payments over $100', 'group by source'];

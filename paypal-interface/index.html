@@ -67,6 +67,48 @@
           </button>
         </form>
 
+        <form id="signupForm" class="login-form hidden" onsubmit="return false;">
+          <div class="form-floating-group">
+            <select id="signupKind" class="form-input">
+              <option value="personal">Personal account</option>
+              <option value="business">Business account</option>
+            </select>
+            <label for="signupKind" class="floating-label">Account type</label>
+          </div>
+          <div class="form-floating-group">
+            <input type="text" id="signupName" class="form-input" placeholder=" " autocomplete="name" maxlength="60" required>
+            <label for="signupName" class="floating-label">Full name</label>
+          </div>
+          <div class="form-floating-group">
+            <input type="email" id="signupEmail" class="form-input" placeholder=" " autocomplete="email" autocapitalize="none" spellcheck="false" required>
+            <label for="signupEmail" class="floating-label">Email</label>
+          </div>
+          <div class="form-floating-group">
+            <input type="password" id="signupPassword" class="form-input" placeholder=" " autocomplete="new-password" minlength="6" required>
+            <label for="signupPassword" class="floating-label">Create password</label>
+          </div>
+          <div class="form-floating-group">
+            <input type="password" id="signupConfirm" class="form-input" placeholder=" " autocomplete="new-password" minlength="6" required>
+            <label for="signupConfirm" class="floating-label">Confirm password</label>
+          </div>
+
+          <p class="login-error hidden" id="signupError" role="alert"></p>
+
+          <button type="submit" class="btn btn-primary btn-block btn-login" id="signupSubmitBtn">
+            <span>Create Account</span>
+          </button>
+
+          <div class="or-divider">
+            <span class="divider-line"></span>
+            <span class="divider-text">or</span>
+            <span class="divider-line"></span>
+          </div>
+
+          <button type="button" class="btn btn-secondary btn-block" id="backToLoginBtn">
+            <span>Log In</span>
+          </button>
+        </form>
+
         <div class="login-card-footer">
           <div class="security-badge">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2c2e2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>

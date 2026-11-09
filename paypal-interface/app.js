@@ -112,6 +112,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Sign up (signups.ts): name, email, password twice. Opens the shared demo account with their name;
+  // alert emails go to the email entered here.
+  const signupForm = document.getElementById('signupForm');
+  const signupError = document.getElementById('signupError');
+  const signupSubmitBtn = document.getElementById('signupSubmitBtn');
+
+  function showSignUp(show) {
+    signupForm.classList.toggle('hidden', !show);
+    loginForm.classList.toggle('hidden', show);
+    showLoginError('');
+    signupError.classList.add('hidden');
+    (show ? document.getElementById('signupName') : loginEmail).focus();
+  }
+
+  signUpBtn.addEventListener('click', () => showSignUp(true));
+  document.getElementById('backToLoginBtn').addEventListener('click', () => showSignUp(false));
+
+  signupForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const field = (id) => document.getElementById(id);
+    const body = {
+      kind: field('signupKind').value,
+      name: field('signupName').value.trim(),
+      email: field('signupEmail').value.trim(),
+      password: field('signupPassword').value,
+      confirmPassword: field('signupConfirm').value,
+    };
+    const fail = (message) => {
+      signupError.textContent = message;
+      signupError.classList.toggle('hidden', !message);
+    };
+    fail('');
+    if (!body.name || !body.email || !body.password) return fail('Fill in every field.');
+    if (body.password.length < 6) return fail('Password must be at least 6 characters.');
+    if (body.password !== body.confirmPassword) return fail('Passwords do not match.');
+
+    signupSubmitBtn.disabled = true;
+    signupSubmitBtn.innerHTML = '<span>Creating account...</span>';
+    try {
+      const user = await request('/auth/signup', body);
+      field('signupPassword').value = '';
+      field('signupConfirm').value = '';
+      signupForm.classList.add('hidden');
+      loginForm.classList.remove('hidden');
+      await enterDashboard(user);
+      if (user.kind !== 'business') showToast(`Welcome, ${user.name}! Alerts will be emailed to ${user.email}.`, 'success');
+    } catch (err) {
+      fail(err.message || 'Could not sign up.');
+    } finally {
+      signupSubmitBtn.disabled = false;
+      signupSubmitBtn.innerHTML = '<span>Create Account</span>';
+    }
+  });
+
   logoutBtn.addEventListener('click', async () => {
     await request('/auth/logout', {}).catch(() => {});
     currentUser = null;

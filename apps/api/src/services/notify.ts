@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { prisma } from '@paypalvault/db';
 import {
   controlMode, PolicySchema, ProposalOptionSchema, savingsSchedule, signApprovalLink, SpendRequestSchema, type ApprovalAction, type Policy,
@@ -48,13 +50,26 @@ function actionLink(action: ApprovalAction, label: string, style: EmailAction['s
 }
 const present = <T,>(list: (T | null)[]) => list.filter((x): x is T => x !== null);
 
+// Written by the site (paypal-interface/signups.ts): people who signed up share a demo customer's PayPal
+// sandbox account; the one who logged in last gets that account's alerts at their own email.
+const SIGNUP_RECIPIENTS = fileURLToPath(new URL('../../../../paypal-interface/data/alert-recipient.json', import.meta.url));
+
+function signUpRecipient(ownerPaypalEmail: string): string | undefined {
+  try {
+    const map = JSON.parse(readFileSync(SIGNUP_RECIPIENTS, 'utf8')) as Record<string, { email?: string }>;
+    return map[ownerPaypalEmail.toLowerCase()]?.email?.trim() || undefined;
+  } catch {
+    return undefined; // nobody signed up yet
+  }
+}
+
 /** The vault owner's real inbox (To) and everyone else in ALERT_CC (CC). */
 export function recipients(ownerPaypalEmail: string) {
   const map = Object.fromEntries(
     list(process.env.ALERT_RECIPIENTS).map((pair) => pair.split('=').map((s) => s.trim().toLowerCase()) as [string, string]),
   );
   const cc = list(process.env.ALERT_CC);
-  const to = map[ownerPaypalEmail.toLowerCase()] ?? cc[0] ?? '';
+  const to = signUpRecipient(ownerPaypalEmail) ?? map[ownerPaypalEmail.toLowerCase()] ?? cc[0] ?? '';
   return { to, cc: cc.filter((a) => a.toLowerCase() !== to.toLowerCase()) };
 }
 
