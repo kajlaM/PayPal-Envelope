@@ -834,7 +834,10 @@
   }
 
   function acknowledge(product, { quiet = false } = {}) {
-    stampede.acked[product] = Date.now();
+    // Mark the product's latest payment as seen, using the payment's own (server) time rather than this
+    // computer's clock: a clock behind the server would leave the alert "unchecked" forever.
+    const lastAt = stampede.rows.find((r) => r.product === product)?.lastAt;
+    stampede.acked[product] = lastAt ? new Date(lastAt).getTime() : Date.now();
     store.set('acked', stampede.acked);
     renderStampede();
     if (!quiet) toast(`Marked "${shortName(product, 40)}" as checked. A new payment for it will alert you again.`);
