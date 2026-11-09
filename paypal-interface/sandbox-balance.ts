@@ -8,11 +8,13 @@
 
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { chromium, type Page } from 'playwright-core';
+import Kernel from '@onkernel/sdk';
+import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import type { Account } from './accounts.ts';
 
 const SANDBOX = 'https://www.sandbox.paypal.com';
 const CHROME = process.env.CHROME_PATH?.trim() || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const VIEWPORT = { width: 1280, height: 900 };
 const PROFILES = fileURLToPath(new URL('./data/browser/', import.meta.url));
 const CACHE_MS = 30_000;
 
@@ -45,20 +47,59 @@ export function withSandboxPage<T>(account: Account, fn: (page: Page, password: 
   if (!password) return Promise.reject(new NoSandboxPasswordError(account.sandboxPasswordEnv));
 
   const run = (browsers.get(account.username) ?? Promise.resolve()).then(async () => {
-    const dir = `${PROFILES}${account.username}`;
-    await mkdir(dir, { recursive: true });
-    const context = await chromium.launchPersistentContext(dir, { executablePath: CHROME, headless: true, viewport: { width: 1280, height: 900 } });
-    try {
-      const page = context.pages()[0] ?? (await context.newPage());
-      page.setDefaultTimeout(30_000);
-      page.setDefaultNavigationTimeout(90_000); // the sandbox is sometimes slow
-      return await fn(page, password);
-    } finally {
-      await context.close();
-    }
+    const kernelKey = process.env.KERNEL_API_KEY?.trim();
+    return kernelKey ? inKernelBrowser(kernelKey, account, (page) => fn(page, password)) : inLocalChrome(account, (page) => fn(page, password));
   });
   browsers.set(account.username, run.catch(() => undefined));
   return run;
+}
+
+async function onPage<T>(context: BrowserContext, fn: (page: Page) => Promise<T>): Promise<T> {
+  const page = context.pages()[0] ?? (await context.newPage());
+  page.setDefaultTimeout(30_000);
+  page.setDefaultNavigationTimeout(90_000); // the sandbox is sometimes slow
+  return fn(page);
+}
+
+/** Local runs: the installed Chrome, with the account's profile folder in data/browser/. */
+async function inLocalChrome<T>(account: Account, fn: (page: Page) => Promise<T>): Promise<T> {
+  const dir = `${PROFILES}${account.username}`;
+  await mkdir(dir, { recursive: true });
+  const context = await chromium.launchPersistentContext(dir, { executablePath: CHROME, headless: true, viewport: VIEWPORT });
+  try {
+    return await onPage(context, fn);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * Hosted runs (no Chrome on the server): a Kernel cloud browser. Each account keeps a Kernel profile
+ * that is saved when the session ends, so PayPal's login cookies survive between reads, as they do
+ * in the local profile folders.
+ */
+async function inKernelBrowser<T>(apiKey: string, account: Account, fn: (page: Page) => Promise<T>): Promise<T> {
+  const kernel = new Kernel({ apiKey });
+  const profile = `paypal-sandbox-${account.username}`.replace(/[^A-Za-z0-9._-]/g, '-');
+  await kernel.profiles.retrieve(profile).catch((err: { status?: number }) => {
+    if (err?.status !== 404) throw err;
+    return kernel.profiles.create({ name: profile });
+  });
+  const session = await kernel.browsers.create({ headless: true, profile: { name: profile, save_changes: true } });
+  try {
+    const browser = await chromium.connectOverCDP(session.cdp_ws_url);
+    try {
+      const context = browser.contexts()[0] ?? (await browser.newContext());
+      return await onPage(context, async (page) => {
+        await page.setViewportSize(VIEWPORT);
+        return fn(page);
+      });
+    } finally {
+      await browser.close().catch(() => undefined);
+    }
+  } finally {
+    await kernel.browsers.deleteByID(session.session_id).catch(() => undefined); // ends the session, saving the profile
+  }
 }
 
 /** The account's current sandbox balance. Cached for 30 s unless `force` is set. */
