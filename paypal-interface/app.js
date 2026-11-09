@@ -83,6 +83,19 @@ document.addEventListener('DOMContentLoaded', () => {
       loginEmail.focus();
     });
 
+  const togglePasswordBtn = document.getElementById('togglePasswordBtn');
+
+  function setLoginPasswordVisible(visible) {
+    loginPassword.type = visible ? 'text' : 'password';
+    togglePasswordBtn.textContent = visible ? 'Hide' : 'Show';
+    togglePasswordBtn.setAttribute('aria-pressed', String(visible));
+  }
+
+  togglePasswordBtn.addEventListener('click', () => {
+    setLoginPasswordVisible(loginPassword.type === 'password');
+    loginPassword.focus();
+  });
+
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     showLoginError('');
@@ -101,6 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const user = await request('/auth/login', { username, password });
       loginPassword.value = '';
+      setLoginPasswordVisible(false);
       await enterDashboard(user);
       if (user.kind !== 'business') showToast(`Welcome back, ${user.name}!`, 'success');
     } catch (err) {
