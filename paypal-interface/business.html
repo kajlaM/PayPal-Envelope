@@ -226,7 +226,7 @@
           <div class="biz-tabs" role="tablist">
             <button type="button" role="tab" class="biz-tab active" data-tab="orders" aria-selected="true">All transactions <span class="biz-count" id="countOrders">0</span></button>
             <button type="button" role="tab" class="biz-tab" data-tab="together" aria-selected="false">Bought together <span class="biz-count" id="countTogether">0</span></button>
-            <button type="button" role="tab" class="biz-tab" data-tab="stampede" aria-selected="false">Stampede watch <span class="biz-count" id="countStampede">0</span></button>
+            <button type="button" role="tab" class="biz-tab" data-tab="stampede" aria-selected="false">Spike Watch <span class="biz-count" id="countStampede">0</span></button>
           </div>
 
           <div id="bizListPanel" class="biz-subpanel">
@@ -290,7 +290,7 @@
                 </select>
               </label>
               <label class="biz-group">Alert at
-                <input type="number" id="bizStampedeThreshold" class="biz-number" min="2" max="500" value="5" aria-label="Payments for one product in the window that count as a stampede">
+                <input type="number" id="bizStampedeThreshold" class="biz-number" min="2" max="500" value="5" aria-label="Payments for one product in the window that count as a spike">
                 payments
               </label>
               <label class="biz-group">Price drop below

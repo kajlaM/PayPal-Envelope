@@ -744,8 +744,8 @@
   // ---------- Stampede watch: payment speed per product (alerts only) ----------
   // Agents buy at machine speed: a price typed wrong in the shop can sell out in minutes. This watches the
   // payments already received and alerts the owner. It never contacts, slows or blocks any agent.
-  const LEVELS = { Stampede: 0, 'Price drop': 1, Busy: 2, Calm: 3 };
-  const LEVEL_CLASS = { Stampede: 'bad', 'Price drop': 'bad', Busy: 'wait', Calm: 'info' };
+  const LEVELS = { Spike: 0, 'Price drop': 1, Busy: 2, Calm: 3 };
+  const LEVEL_CLASS = { Spike: 'bad', 'Price drop': 'bad', Busy: 'wait', Calm: 'info' };
   const stampede = { windowMin: 10, threshold: 5, dropPct: 60, acked: {}, alerted: new Set(), rows: [] };
   let stampedeApi = null;
   let started = false; // no alert toasts for what was already there when the page opened
@@ -770,7 +770,7 @@
         if (h >= 0 && h < 24) spark[23 - h]++;
       }
       const drop = lowest !== null && usual !== null && lowest < usual * (stampede.dropPct / 100);
-      const level = inWin.length >= stampede.threshold && buyers >= Math.min(3, stampede.threshold) ? 'Stampede'
+      const level = inWin.length >= stampede.threshold && buyers >= Math.min(3, stampede.threshold) ? 'Spike'
         : drop ? 'Price drop'
         : inWin.length >= Math.ceil(stampede.threshold / 2) ? 'Busy'
         : 'Calm';
@@ -808,7 +808,7 @@
     { field: 'lastAt', headerName: 'Last payment', width: 130, valueFormatter: (p) => (p.value ? ago(p.value) : ''), chartDataType: 'excluded' },
     {
       colId: 'ack', headerName: '', width: 130, sortable: false, chartDataType: 'excluded',
-      cellRenderer: (p) => (p.data.level === 'Stampede' || p.data.level === 'Price drop')
+      cellRenderer: (p) => (p.data.level === 'Spike' || p.data.level === 'Price drop')
         ? (p.data.acked ? '<span class="biz-muted">Checked ✓</span>' : `<button type="button" class="biz-ack" data-ack="${escapeHtml(p.data.product)}">Mark checked</button>`)
         : '',
     },
@@ -824,7 +824,7 @@
       rowHeight: 46,
       tooltipShowDelay: 400,
       overlayNoRowsTemplate: '<span class="biz-empty">No payments yet. Products show here as soon as agents pay for them.</span>',
-      rowClassRules: { 'biz-row-alert': (p) => (p.data?.level === 'Stampede' || p.data?.level === 'Price drop') && !p.data?.acked },
+      rowClassRules: { 'biz-row-alert': (p) => (p.data?.level === 'Spike' || p.data?.level === 'Price drop') && !p.data?.acked },
       ...chartGridOptions,
     });
     $('gridStampede').addEventListener('click', (e) => {
@@ -844,15 +844,15 @@
     if (!stampedeApi) return;
     stampede.rows = stampedeRows();
     stampedeApi.setGridOption('rowData', stampede.rows);
-    const alerts = stampede.rows.filter((r) => (r.level === 'Stampede' || r.level === 'Price drop') && !r.acked);
+    const alerts = stampede.rows.filter((r) => (r.level === 'Spike' || r.level === 'Price drop') && !r.acked);
     const count = $('countStampede');
     count.textContent = String(alerts.length);
     count.classList.toggle('biz-count-bad', alerts.length > 0);
 
     const banner = $('bizStampedeBanner');
     const windowLabel = $('bizStampedeWindow').selectedOptions[0]?.textContent.toLowerCase() ?? '';
-    const text = (r) => r.level === 'Stampede'
-      ? `<strong>Stampede on ${escapeHtml(shortName(r.product, 48))}</strong>: ${r.inWindow} payments from ${r.buyers} different buyers in the ${escapeHtml(windowLabel)}${r.usual ? ` (usually ${usd(r.usual)}, lowest now ${usd(r.lowest)})` : ''}. Check its price and stock in your shop.`
+    const text = (r) => r.level === 'Spike'
+      ? `<strong>Spike on ${escapeHtml(shortName(r.product, 48))}</strong>: ${r.inWindow} payments from ${r.buyers} different buyers in the ${escapeHtml(windowLabel)}${r.usual ? ` (usually ${usd(r.usual)}, lowest now ${usd(r.lowest)})` : ''}. Check its price and stock in your shop.`
       : `<strong>Price drop on ${escapeHtml(shortName(r.product, 48))}</strong>: paid ${usd(r.lowest)}, usually ${usd(r.usual)}. Check the price in your shop.`;
     if (alerts.length) {
       banner.innerHTML = `<span>${text(alerts[0])}${alerts.length > 1 ? ` <span class="biz-muted">+${alerts.length - 1} more</span>` : ''}</span>
@@ -1339,8 +1339,8 @@
   document.querySelectorAll('[data-tab-link]').forEach((el) => el.addEventListener('click', () => showSection(el.dataset.tabLink)));
   document.querySelectorAll('[data-demo]').forEach((el) => el.addEventListener('click', () => toast(el.dataset.demo)));
   $('bizNotificationsBtn').addEventListener('click', () => {
-    const alerts = stampede.rows.filter((r) => (r.level === 'Stampede' || r.level === 'Price drop') && !r.acked).length;
-    toast(alerts ? `${alerts} payment ${alerts === 1 ? 'alert' : 'alerts'}: open AI agent sales → Stampede watch.` : 'No new notifications');
+    const alerts = stampede.rows.filter((r) => (r.level === 'Spike' || r.level === 'Price drop') && !r.acked).length;
+    toast(alerts ? `${alerts} payment ${alerts === 1 ? 'alert' : 'alerts'}: open AI agent sales → Spike Watch.` : 'No new notifications');
   });
 
   // ---------- Data loading + live updates ----------
