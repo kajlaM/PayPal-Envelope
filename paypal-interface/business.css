@@ -254,9 +254,17 @@
 .biz-stampede-banner {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   background: #FDECEA; border: 1px solid #F5B5A8;
-  border-radius: var(--radius-md); padding: 12px 16px; font-size: 14px; color: var(--pp-gray-900);
+  border-radius: var(--radius-md); padding: 12px 40px 12px 16px; font-size: 14px; color: var(--pp-gray-900);
+  position: relative;
 }
-.biz-stampede-banner > span:nth-child(2) { flex: 1; min-width: 240px; line-height: 1.45; }
+.biz-stampede-banner > span:nth-child(2), .biz-stampede-text { flex: 1; min-width: 0; line-height: 1.45; }
+.biz-stampede-close {
+  position: absolute; top: 6px; right: 6px;
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: transparent; cursor: pointer;
+  font-size: 20px; line-height: 1; color: var(--pp-gray-900); opacity: 0.6;
+}
+.biz-stampede-close:hover, .biz-stampede-close:focus-visible { opacity: 1; background: rgba(0, 0, 0, 0.06); }
 .biz-stampede-icon { font-size: 20px; color: var(--pp-red); }
 .biz-grid .ag-row.biz-row-alert { background: #FFF5F3; }
 .biz-ack {

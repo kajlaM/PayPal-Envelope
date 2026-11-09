@@ -833,11 +833,11 @@
     });
   }
 
-  function acknowledge(product) {
+  function acknowledge(product, { quiet = false } = {}) {
     stampede.acked[product] = Date.now();
     store.set('acked', stampede.acked);
     renderStampede();
-    toast(`Marked "${shortName(product, 40)}" as checked. A new payment for it will alert you again.`);
+    if (!quiet) toast(`Marked "${shortName(product, 40)}" as checked. A new payment for it will alert you again.`);
   }
 
   function renderStampede() {
@@ -855,9 +855,8 @@
       ? `<strong>Spike on ${escapeHtml(shortName(r.product, 48))}</strong>: ${r.inWindow} payments from ${r.buyers} different buyers in the ${escapeHtml(windowLabel)}${r.usual ? ` (usually ${usd(r.usual)}, lowest now ${usd(r.lowest)})` : ''}. Check its price and stock in your shop.`
       : `<strong>Price drop on ${escapeHtml(shortName(r.product, 48))}</strong>: paid ${usd(r.lowest)}, usually ${usd(r.usual)}. Check the price in your shop.`;
     if (alerts.length) {
-      banner.innerHTML = `<span>${text(alerts[0])}${alerts.length > 1 ? ` <span class="biz-muted">+${alerts.length - 1} more</span>` : ''}</span>
-        <button type="button" class="btn btn-outline biz-small" data-stampede-view>View</button>
-        <button type="button" class="btn btn-outline biz-small" data-ack="${escapeHtml(alerts[0].product)}">Mark checked</button>`;
+      banner.innerHTML = `<span class="biz-stampede-text">${text(alerts[0])}${alerts.length > 1 ? ` <span class="biz-muted">+${alerts.length - 1} more</span>` : ''}</span>
+        <button type="button" class="biz-stampede-close" data-dismiss="${escapeHtml(alerts[0].product)}" aria-label="Close alert" title="Close">&times;</button>`;
       banner.classList.remove('hidden');
     } else banner.classList.add('hidden');
 
@@ -872,10 +871,10 @@
     renderTvAlert(alerts.length ? text(alerts[0]) : '');
   }
 
+  // The × closes the alert; it comes back only when a new payment for that product arrives.
   $('bizStampedeBanner').addEventListener('click', (e) => {
-    if (e.target.closest('[data-stampede-view]')) { showSection('ai-sales'); selectTab('stampede'); }
-    const ack = e.target.closest('[data-ack]');
-    if (ack) acknowledge(ack.dataset.ack);
+    const close = e.target.closest('[data-dismiss]');
+    if (close) acknowledge(close.dataset.dismiss, { quiet: true });
   });
 
   function readStampedeSettings() {
