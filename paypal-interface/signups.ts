@@ -81,10 +81,10 @@ export function signUpPasswordOk(account: Account, password: unknown): boolean |
 }
 
 /** Email buttons (no session): the password of the sign-up who gets this account's alerts. */
-export function recipientPasswordOk(account: Account, password: unknown, vaultId?: string) {
+export function recipientPasswordOk(account: Account, password: unknown, vaultAlertEmail?: string | null) {
   try {
     const map = JSON.parse(readFileSync(RECIPIENT_FILE, 'utf8')) as Record<string, { email?: string }>;
-    const email = (vaultId && map[`vault:${vaultId}`]?.email) || map[account.sandboxEmail.toLowerCase()]?.email || '';
+    const email = vaultAlertEmail || map[account.sandboxEmail.toLowerCase()]?.email || '';
     const signup = findByEmail(email);
     return !!signup && passwordMatches(signup.passwordHash, String(password ?? ''));
   } catch {
@@ -139,23 +139,6 @@ export function setAlertRecipient(account: Account, signup: SignUp | null) {
   const key = account.sandboxEmail.toLowerCase();
   if (signup) current[key] = { email: signup.email, name: signup.name };
   else delete current[key];
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(RECIPIENT_FILE, JSON.stringify(current, null, 2));
-}
-
-/**
- * Every sign-up shares one demo customer, so "whoever logged in last" can be someone else by the time a
- * vault's emails go out. Remember who made each vault: notify.ts reads `vault:<id>` before the account's
- * last-login entry, so a vault's alerts always reach the sign-up who created it.
- */
-export function setVaultRecipient(vaultId: string, signup: SignUp) {
-  let current: Record<string, { email: string; name: string }> = {};
-  try {
-    current = JSON.parse(readFileSync(RECIPIENT_FILE, 'utf8'));
-  } catch {
-    // first write
-  }
-  current[`vault:${vaultId}`] = { email: signup.email, name: signup.name };
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileSync(RECIPIENT_FILE, JSON.stringify(current, null, 2));
 }

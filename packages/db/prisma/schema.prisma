@@ -84,6 +84,8 @@ model Vault {
   savingsEvery           SavingsInterval?
   nextChargeAt           DateTime?
   chargeFailures         Int              @default(0) // declined payments in a row
+  // A site sign-up who made this vault (they share one demo customer): its alert emails go to them
+  alertEmail             String?
   savingsPausedAt        DateTime?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
