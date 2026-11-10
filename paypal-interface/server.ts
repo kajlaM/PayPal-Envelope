@@ -17,7 +17,7 @@ import { PayPalApiError } from '@paypalvault/paypal';
 import { SAVINGS_INTERVALS, savingsExpiry, verifyApprovalLink, type ApprovalAction } from '@paypalvault/policy';
 import { BRYNTUM_OUT, ensureBryntum } from '../scripts/build-bryntum.mjs';
 import { ACCOUNTS, BUSINESS_ACCOUNTS, type Account, type BusinessAccount } from './accounts.ts';
-import { accountFor, baseBusiness, checkSignUpLogin, isBusiness, createSignUp, findSignUp, recipientPasswordOk, setAlertRecipient, signUpPasswordOk, SIGNUP_PREFIX, SignUpError } from './signups.ts';
+import { accountFor, baseBusiness, checkSignUpLogin, isBusiness, createSignUp, findSignUp, recipientPasswordOk, setAlertRecipient, setVaultRecipient, signUpPasswordOk, SIGNUP_PREFIX, SignUpError } from './signups.ts';
 import * as business from './business.ts';
 import { businessBalance } from './business-balance.ts';
 import { connection as transactionsConnection, syncTransactions } from './business-transactions.ts';
@@ -638,6 +638,9 @@ async function createVault(account: Account, req: Request): Promise<Created> {
   if (funding === 'PAYPAL') await checkBalance(account, firstCents);
 
   const vault = await vaultApi.createVault({ policy: req.body.policy, sourceText: req.body.sourceText, userId });
+  // A sign-up's vault emails go to them, even after someone else logs into the shared demo account.
+  const creator = findSignUp((account as { signupId?: string }).signupId ?? '');
+  if (creator) setVaultRecipient(vault.id, creator);
   // Answer from here on even if reading the vault back fails: it exists, so a retry must not make another.
   const created = async (extra: Record<string, unknown> = {}): Promise<Created> => ({
     status: 201,
@@ -1121,7 +1124,7 @@ app.post('/email/act', express.urlencoded({ extended: false, limit: '8kb' }), as
   const again = (error: string, status = 400) => actionPage(res, status, {
     title: ctx.heading, rows: ctx.rows, form: { token, button: ctx.button, needsPassword: ctx.needsPassword, error }, vaultId: ctx.vault.id,
   });
-  if (ctx.needsPassword && !(ctx.owner && (passwordOk(ctx.owner, req.body?.password) || recipientPasswordOk(ctx.owner, req.body?.password)))) return again('Wrong password.', 401);
+  if (ctx.needsPassword && !(ctx.owner && (passwordOk(ctx.owner, req.body?.password) || recipientPasswordOk(ctx.owner, req.body?.password, ctx.vault.id)))) return again('Wrong password.', 401);
 
   const done = (title: string, text: string, tone: 'good' | 'warn' | 'bad' = 'good') => actionPage(res, 200, { title, text, vaultId: ctx.vault.id, tone });
   try {

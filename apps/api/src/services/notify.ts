@@ -54,22 +54,23 @@ const present = <T,>(list: (T | null)[]) => list.filter((x): x is T => x !== nul
 // sandbox account; the one who logged in last gets that account's alerts at their own email.
 const SIGNUP_RECIPIENTS = fileURLToPath(new URL('../../../../paypal-interface/data/alert-recipient.json', import.meta.url));
 
-function signUpRecipient(ownerPaypalEmail: string): string | undefined {
+function signUpRecipient(ownerPaypalEmail: string, vaultId?: string): string | undefined {
   try {
     const map = JSON.parse(readFileSync(SIGNUP_RECIPIENTS, 'utf8')) as Record<string, { email?: string }>;
-    return map[ownerPaypalEmail.toLowerCase()]?.email?.trim() || undefined;
+    // The sign-up who created this vault first (signups.ts setVaultRecipient), then whoever logged in last.
+    return (vaultId && map[`vault:${vaultId}`]?.email?.trim()) || map[ownerPaypalEmail.toLowerCase()]?.email?.trim() || undefined;
   } catch {
     return undefined; // nobody signed up yet
   }
 }
 
 /** The vault owner's real inbox (To) and everyone else in ALERT_CC (CC). */
-export function recipients(ownerPaypalEmail: string) {
+export function recipients(ownerPaypalEmail: string, vaultId?: string) {
   const map = Object.fromEntries(
     list(process.env.ALERT_RECIPIENTS).map((pair) => pair.split('=').map((s) => s.trim().toLowerCase()) as [string, string]),
   );
   const cc = list(process.env.ALERT_CC);
-  const to = signUpRecipient(ownerPaypalEmail) ?? map[ownerPaypalEmail.toLowerCase()] ?? cc[0] ?? '';
+  const to = signUpRecipient(ownerPaypalEmail, vaultId) ?? map[ownerPaypalEmail.toLowerCase()] ?? cc[0] ?? '';
   return { to, cc: cc.filter((a) => a.toLowerCase() !== to.toLowerCase()) };
 }
 
@@ -81,7 +82,7 @@ async function send(input: EmailInput, extra: { ownerEmail: string; status: stri
   const url = hookUrl();
   if (!url) return;
   const email: Email = buildEmail(input);
-  const { to, cc } = recipients(extra.ownerEmail);
+  const { to, cc } = recipients(extra.ownerEmail, input.vault.id);
   const v = input.vault;
   const alert: Alert = {
     event: input.kind,
