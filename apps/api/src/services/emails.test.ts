@@ -90,12 +90,22 @@ test('text from shops and the AI is escaped in the HTML email', () => {
 });
 
 test('mail goes to the vault owner, with everyone else in CC', () => {
+  process.env.SIGNUP_RECIPIENTS_FILE = 'no-such-file.json'; // no site sign-up logged in: only .env decides
   process.env.ALERT_RECIPIENTS = 'kajla@personal.example.com=kajla@gmail.example, jugal@personal.example.com=jugal@gmail.example';
   process.env.ALERT_CC = 'kajla@gmail.example,jugal@gmail.example,team@gmail.example';
   assert.deepEqual(recipients('Kajla@Personal.Example.com'), { to: 'kajla@gmail.example', cc: ['jugal@gmail.example', 'team@gmail.example'] });
   assert.deepEqual(recipients('jugal@personal.example.com'), { to: 'jugal@gmail.example', cc: ['kajla@gmail.example', 'team@gmail.example'] });
   // An owner without a mapped inbox: the first CC address receives it.
   assert.deepEqual(recipients('someone@personal.example.com'), { to: 'kajla@gmail.example', cc: ['jugal@gmail.example', 'team@gmail.example'] });
+});
+
+test('a vault made by a site sign-up mails that sign-up, whoever logged in last', () => {
+  process.env.SIGNUP_RECIPIENTS_FILE = 'no-such-file.json';
+  process.env.ALERT_RECIPIENTS = 'kajla@personal.example.com=kajla@gmail.example';
+  process.env.ALERT_CC = 'kajla@gmail.example,team@gmail.example';
+  assert.deepEqual(recipients('kajla@personal.example.com', 'Guest@Gmail.example'), { to: 'Guest@Gmail.example', cc: ['kajla@gmail.example', 'team@gmail.example'] });
+  // No creator stored (vaults made before the column existed): the old rules apply.
+  assert.deepEqual(recipients('kajla@personal.example.com', null), { to: 'kajla@gmail.example', cc: ['team@gmail.example'] });
 });
 
 test('a rules change lists only what changed', () => {

@@ -52,11 +52,13 @@ const present = <T,>(list: (T | null)[]) => list.filter((x): x is T => x !== nul
 
 // Written by the site (paypal-interface/signups.ts): people who signed up share a demo customer's PayPal
 // sandbox account; the one who logged in last gets that account's alerts at their own email.
-const SIGNUP_RECIPIENTS = fileURLToPath(new URL('../../../../paypal-interface/data/alert-recipient.json', import.meta.url));
+// SIGNUP_RECIPIENTS_FILE overrides where it is read from (tests point it at a file that doesn't exist).
+const signUpRecipientsFile = () =>
+  process.env.SIGNUP_RECIPIENTS_FILE?.trim() || fileURLToPath(new URL('../../../../paypal-interface/data/alert-recipient.json', import.meta.url));
 
 function signUpRecipient(ownerPaypalEmail: string): string | undefined {
   try {
-    const map = JSON.parse(readFileSync(SIGNUP_RECIPIENTS, 'utf8')) as Record<string, { email?: string }>;
+    const map = JSON.parse(readFileSync(signUpRecipientsFile(), 'utf8')) as Record<string, { email?: string }>;
     return map[ownerPaypalEmail.toLowerCase()]?.email?.trim() || undefined;
   } catch {
     return undefined; // nobody signed up yet
