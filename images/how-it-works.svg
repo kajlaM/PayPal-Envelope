@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 330" width="1280" height="330" role="img" aria-labelledby="t d">
+  <title id="t">How PayPal Envelope works</title>
+  <desc id="d">Four steps: describe the job, fund the envelope from PayPal, the AI agent shops inside your rules, and leftover money returns to your PayPal.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#0070BA"/>
+    </marker>
+    <style>
+      .num { font: 800 15px Inter, "Segoe UI", Arial, sans-serif; fill: #FFFFFF; }
+      .h { font: 700 19px Inter, "Segoe UI", Arial, sans-serif; fill: #0A1F44; }
+      .s { font: 400 14px Inter, "Segoe UI", Arial, sans-serif; fill: #3D4B60; }
+      .q { font: italic 500 13.5px Inter, "Segoe UI", Arial, sans-serif; fill: #0070BA; }
+    </style>
+  </defs>
+  <rect width="1280" height="330" rx="20" fill="#F5F8FC"/>
+
+  <!-- Step 1: describe -->
+  <g transform="translate(30 30)">
+    <rect width="278" height="270" rx="16" fill="#FFFFFF" stroke="#D5E0EE"/>
+    <circle cx="34" cy="34" r="16" fill="#003087"/><text x="34" y="39" text-anchor="middle" class="num">1</text>
+    <!-- speech bubble icon -->
+    <path d="M200 20 h52 a10 10 0 0 1 10 10 v28 a10 10 0 0 1 -10 10 h-30 l-12 12 v-12 h-10 a10 10 0 0 1 -10 -10 v-28 a10 10 0 0 1 10 -10 z" fill="#E3EEFA"/>
+    <rect x="202" y="34" width="44" height="5" rx="2.5" fill="#0070BA"/>
+    <rect x="202" y="46" width="30" height="5" rx="2.5" fill="#0070BA"/>
+    <text x="24" y="102" class="h">Describe the job</text>
+    <text x="24" y="130" class="q">"Buy noise-cancelling headphones</text>
+    <text x="24" y="149" class="q">under $100 before Friday."</text>
+    <text x="24" y="182" class="s">AI turns your words into clear</text>
+    <text x="24" y="201" class="s">rules: budget, per-item limit,</text>
+    <text x="24" y="220" class="s">allowed shops and an end date.</text>
+    <text x="24" y="246" class="s">You check them and confirm.</text>
+  </g>
+  <path d="M314 165 H336" stroke="#0070BA" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <!-- Step 2: fund -->
+  <g transform="translate(342 30)">
+    <rect width="278" height="270" rx="16" fill="#FFFFFF" stroke="#D5E0EE"/>
+    <circle cx="34" cy="34" r="16" fill="#003087"/><text x="34" y="39" text-anchor="middle" class="num">2</text>
+    <!-- envelope icon -->
+    <rect x="196" y="22" width="66" height="46" rx="7" fill="#0A2A7A"/>
+    <path d="M196 30 L229 52 L262 30" stroke="#5BC0F2" stroke-width="3" fill="none"/>
+    <circle cx="229" cy="50" r="5" fill="#F5C242"/>
+    <text x="24" y="102" class="h">Fund it with PayPal</text>
+    <text x="24" y="130" class="s">Exactly $100 moves from your</text>
+    <text x="24" y="149" class="s">PayPal into the envelope. Pay</text>
+    <text x="24" y="168" class="s">now, use Pay Later, ask a friend</text>
+    <text x="24" y="187" class="s">to chip in, or save up week by</text>
+    <text x="24" y="206" class="s">week.</text>
+    <text x="24" y="232" class="s">The rest of your account stays</text>
+    <text x="24" y="251" class="s">out of reach.</text>
+  </g>
+  <path d="M626 165 H648" stroke="#0070BA" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <!-- Step 3: shop -->
+  <g transform="translate(654 30)">
+    <rect width="278" height="270" rx="16" fill="#FFFFFF" stroke="#D5E0EE"/>
+    <circle cx="34" cy="34" r="16" fill="#003087"/><text x="34" y="39" text-anchor="middle" class="num">3</text>
+    <!-- shield icon -->
+    <path d="M229 18 L260 30 V48 C260 64 247 74 229 80 C211 74 198 64 198 48 V30 Z" fill="#0A2A7A"/>
+    <path d="M216 48 L226 58 L244 40" stroke="#FFFFFF" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="24" y="102" class="h">The agent shops</text>
+    <text x="24" y="130" class="s">It searches your allowed shops,</text>
+    <text x="24" y="149" class="s">compares prices and asks to buy.</text>
+    <text x="24" y="182" class="s">Fixed rules (not AI) approve,</text>
+    <text x="24" y="201" class="s">block, or ask you first. Only an</text>
+    <text x="24" y="220" class="s">approved purchase is paid,</text>
+    <text x="24" y="239" class="s">through PayPal.</text>
+  </g>
+  <path d="M938 165 H960" stroke="#0070BA" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <!-- Step 4: return -->
+  <g transform="translate(966 30)">
+    <rect width="284" height="270" rx="16" fill="#FFFFFF" stroke="#D5E0EE"/>
+    <circle cx="34" cy="34" r="16" fill="#003087"/><text x="34" y="39" text-anchor="middle" class="num">4</text>
+    <!-- return arrow icon -->
+    <circle cx="232" cy="49" r="30" fill="#E6F4EC"/>
+    <path d="M246 40 A16 16 0 1 0 248 56" stroke="#007934" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <path d="M238 32 L249 39 L238 46" stroke="#007934" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="24" y="102" class="h">Leftovers come back</text>
+    <text x="24" y="130" class="s">When the job is done or the end</text>
+    <text x="24" y="149" class="s">date passes, the envelope closes</text>
+    <text x="24" y="168" class="s">and unspent money is sent back</text>
+    <text x="24" y="187" class="s">to your PayPal automatically.</text>
+    <text x="24" y="220" class="s">Every payment is checked</text>
+    <text x="24" y="239" class="s">against PayPal's own records.</text>
+  </g>
+</svg>

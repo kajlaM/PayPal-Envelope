@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" width="1400" height="820" role="img" aria-labelledby="t d">
+  <title id="t">The journey of one purchase</title>
+  <desc id="d">The agent finds, filters, compares and verifies a product, then asks to buy. The rule engine checks hard and soft rules, and the request ends in one of three ways: paid, sent to the owner, or blocked.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#33507A"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#007934"/></marker>
+    <marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#B7791F"/></marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#C2361B"/></marker>
+    <style>
+      .band { font: 700 12px Inter, "Segoe UI", Arial, sans-serif; letter-spacing: .12em; fill: #6B7A90; }
+      .h { font: 700 15.5px Inter, "Segoe UI", Arial, sans-serif; fill: #0A1F44; }
+      .hw { font: 700 17px Inter, "Segoe UI", Arial, sans-serif; fill: #FFFFFF; }
+      .s { font: 400 12.5px Inter, "Segoe UI", Arial, sans-serif; fill: #3D4B60; }
+      .sw { font: 400 12.5px Inter, "Segoe UI", Arial, sans-serif; fill: #D8E6FF; }
+      .tag { font: 600 11px Inter, "Segoe UI", Arial, sans-serif; fill: #0070BA; }
+      .n { font: 800 12px Inter, "Segoe UI", Arial, sans-serif; fill: #FFFFFF; }
+      .ln { stroke: #33507A; stroke-width: 2; fill: none; }
+    </style>
+  </defs>
+  <rect width="1400" height="820" rx="20" fill="#F5F8FC"/>
+  <text x="40" y="44" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800" fill="#0A1F44">The journey of one purchase</text>
+  <text x="40" y="68" class="s">The AI does the looking. Plain code decides. PayPal moves the money only after every hard rule passes.</text>
+
+  <!-- Stage 1: the agent prepares -->
+  <text x="40" y="112" class="band">1 · THE AGENT PREPARES A REQUEST</text>
+  <g>
+    <rect x="40" y="126" width="250" height="132" rx="14" fill="#FFFFFF" stroke="#C9D6E8"/>
+    <circle cx="64" cy="152" r="12" fill="#003087"/><text x="64" y="156" text-anchor="middle" class="n">1</text>
+    <text x="84" y="157" class="h">Find</text>
+    <text x="56" y="184" class="s">Searches only the shops in</text>
+    <text x="56" y="202" class="s">the envelope's rules, under</text>
+    <text x="56" y="220" class="s">the money it may spend.</text>
+    <text x="56" y="244" class="tag">Channel3 · demo store</text>
+
+    <rect x="312" y="126" width="250" height="132" rx="14" fill="#FFFFFF" stroke="#C9D6E8"/>
+    <circle cx="336" cy="152" r="12" fill="#003087"/><text x="336" y="156" text-anchor="middle" class="n">2</text>
+    <text x="356" y="157" class="h">Filter and rank</text>
+    <text x="328" y="184" class="s">Drops wrong models, used</text>
+    <text x="328" y="202" class="s">items, low ratings, slow</text>
+    <text x="328" y="220" class="s">delivery. Ranks the rest.</text>
+    <text x="328" y="244" class="tag">plain code, no AI</text>
+
+    <rect x="584" y="126" width="250" height="132" rx="14" fill="#FFFFFF" stroke="#C9D6E8"/>
+    <circle cx="608" cy="152" r="12" fill="#003087"/><text x="608" y="156" text-anchor="middle" class="n">3</text>
+    <text x="628" y="157" class="h">Compare</text>
+    <text x="600" y="184" class="s">Same model cheaper at another</text>
+    <text x="600" y="202" class="s">shop? Price far above its</text>
+    <text x="600" y="220" class="s">90-day normal? Then wait.</text>
+    <text x="600" y="244" class="tag">Channel3 price history</text>
+
+    <rect x="856" y="126" width="250" height="132" rx="14" fill="#FFFFFF" stroke="#C9D6E8"/>
+    <circle cx="880" cy="152" r="12" fill="#003087"/><text x="880" y="156" text-anchor="middle" class="n">4</text>
+    <text x="900" y="157" class="h">Verify the price</text>
+    <text x="872" y="184" class="s">Opens the product page in a</text>
+    <text x="872" y="202" class="s">cloud browser and reads the</text>
+    <text x="872" y="220" class="s">price the shop really charges.</text>
+    <text x="872" y="244" class="tag">Kernel</text>
+
+    <rect x="1128" y="126" width="232" height="132" rx="14" fill="#0070BA"/>
+    <circle cx="1152" cy="152" r="12" fill="#FFFFFF"/><text x="1152" y="156" text-anchor="middle" class="n" style="fill:#0070BA">5</text>
+    <text x="1172" y="157" class="hw">Ask to buy</text>
+    <text x="1144" y="184" class="sw">Shop, amount, category,</text>
+    <text x="1144" y="202" class="sw">the live price and the</text>
+    <text x="1144" y="220" class="sw">shopping-list item. It can</text>
+    <text x="1144" y="238" class="sw">only ask; it can't pay.</text>
+  </g>
+  <path class="ln" d="M290 192 H308" marker-end="url(#a)"/>
+  <path class="ln" d="M562 192 H580" marker-end="url(#a)"/>
+  <path class="ln" d="M834 192 H852" marker-end="url(#a)"/>
+  <path class="ln" d="M1106 192 H1124" marker-end="url(#a)"/>
+  <path class="ln" d="M1244 258 V300 H700 V318" marker-end="url(#a)"/>
+
+  <!-- Stage 2: rule engine -->
+  <text x="40" y="312" class="band">2 · THE RULE ENGINE DECIDES</text>
+  <rect x="40" y="322" width="1320" height="196" rx="16" fill="#0A2A7A"/>
+  <text x="66" y="354" class="hw">Rule engine · plain TypeScript, no AI, 32 unit tests · reports every reason</text>
+  <g>
+    <rect x="66" y="370" width="630" height="128" rx="12" fill="#FFFFFF"/>
+    <text x="86" y="396" class="h" style="fill:#C2361B">Hard rules: any failure blocks</text>
+    <text x="86" y="422" class="s">• Envelope open, not ended, not still saving</text>
+    <text x="86" y="442" class="s">• Price within the per-item limit and the money left</text>
+    <text x="86" y="462" class="s">• Shop allowed and registered · category allowed</text>
+    <text x="86" y="482" class="s">• Daily limit · live price equals asked price</text>
+    <text x="400" y="422" class="s">• Bill: an open PayPal invoice from that</text>
+    <text x="412" y="442" class="s">utility, for the exact amount, not yet paid</text>
+    <text x="400" y="462" class="s">• List item: known, not bought, under its</text>
+    <text x="412" y="482" class="s">own limit</text>
+
+    <rect x="712" y="370" width="622" height="128" rx="12" fill="#FFFFFF"/>
+    <text x="732" y="396" class="h" style="fill:#B7791F">Soft rules: any flag asks the owner first</text>
+    <text x="732" y="422" class="s">• Above the "ask above" amount, or the setting is "Ask me"</text>
+    <text x="732" y="442" class="s">• The live price couldn't be read</text>
+    <text x="732" y="462" class="s">• Same shop and amount within 10 minutes (possible repeat)</text>
+    <text x="732" y="482" class="s">• Unusual compared with this envelope's history (Elastic)</text>
+  </g>
+
+  <!-- Stage 3: outcomes -->
+  <text x="40" y="566" class="band">3 · ONE OF THREE OUTCOMES</text>
+  <path d="M260 518 V588" stroke="#007934" stroke-width="2.5" fill="none" marker-end="url(#ag)"/>
+  <path d="M700 518 V588" stroke="#B7791F" stroke-width="2.5" fill="none" marker-end="url(#aw)"/>
+  <path d="M1140 518 V588" stroke="#C2361B" stroke-width="2.5" fill="none" marker-end="url(#ab)"/>
+
+  <g>
+    <rect x="40" y="592" width="440" height="200" rx="16" fill="#FFFFFF" stroke="#7CC49A" stroke-width="2"/>
+    <rect x="40" y="592" width="440" height="40" rx="16" fill="#E6F4EC"/><rect x="40" y="616" width="440" height="16" fill="#E6F4EC"/>
+    <text x="62" y="618" class="h" style="fill:#007934">✓ Approved: PayPal pays the shop</text>
+    <text x="62" y="658" class="s">1. The money is held in the ledger first, inside a</text>
+    <text x="78" y="676" class="s">transaction that locks the envelope's row.</text>
+    <text x="62" y="700" class="s">2. PayPal Checkout pays the shop as payee (buyer</text>
+    <text x="78" y="718" class="s">protection). Payouts if Checkout isn't available.</text>
+    <text x="62" y="742" class="s">3. The payment is marked complete, the owner gets</text>
+    <text x="78" y="760" class="s">an email, and tonight it is checked with PayPal.</text>
+  </g>
+  <g>
+    <rect x="490" y="592" width="420" height="200" rx="16" fill="#FFFFFF" stroke="#E2B65C" stroke-width="2"/>
+    <rect x="490" y="592" width="420" height="40" rx="16" fill="#FFF7E6"/><rect x="490" y="616" width="420" height="16" fill="#FFF7E6"/>
+    <text x="512" y="618" class="h" style="fill:#B7791F">? Needs you: the owner decides</text>
+    <text x="512" y="658" class="s">1. The request waits, shown in the app and sent</text>
+    <text x="528" y="676" class="s">by email with Approve and Reject buttons.</text>
+    <text x="512" y="700" class="s">2. Approving needs the owner's password.</text>
+    <text x="512" y="724" class="s">3. The hard rules run again, because the envelope</text>
+    <text x="528" y="742" class="s">may have changed. Then it is paid as on the left.</text>
+    <text x="512" y="766" class="s">Rejecting sends the agent back to searching.</text>
+  </g>
+  <g>
+    <rect x="920" y="592" width="440" height="200" rx="16" fill="#FFFFFF" stroke="#E79B8C" stroke-width="2"/>
+    <rect x="920" y="592" width="440" height="40" rx="16" fill="#FDECEA"/><rect x="920" y="616" width="440" height="16" fill="#FDECEA"/>
+    <text x="942" y="618" class="h" style="fill:#C2361B">✕ Blocked: no money moves</text>
+    <text x="942" y="658" class="s">1. Every failing rule is recorded, in plain words,</text>
+    <text x="958" y="676" class="s">in the envelope's activity log.</text>
+    <text x="942" y="700" class="s">2. The owner gets an email with the reasons and</text>
+    <text x="958" y="718" class="s">how to allow it, if they want to.</text>
+    <text x="942" y="742" class="s">3. The agent moves on to the next product, or</text>
+    <text x="958" y="760" class="s">waits and looks again later.</text>
+  </g>
+</svg>

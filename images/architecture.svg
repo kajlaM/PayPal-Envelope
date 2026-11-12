@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1420 1000" width="1420" height="1000" role="img" aria-labelledby="t d">
+  <title id="t">PayPal Envelope system architecture</title>
+  <desc id="d">Six layers: people, front ends, the public site server, the PayPal Envelope API, the core packages, and the outside services they use.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#33507A"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#007934"/>
+    </marker>
+    <style>
+      .t { font-family: Inter, "Segoe UI", Arial, sans-serif; }
+      .band { font: 700 12px Inter, "Segoe UI", Arial, sans-serif; letter-spacing: .12em; fill: #6B7A90; }
+      .h { font: 700 16px Inter, "Segoe UI", Arial, sans-serif; fill: #0A1F44; }
+      .hw { font: 700 16px Inter, "Segoe UI", Arial, sans-serif; fill: #FFFFFF; }
+      .s { font: 400 12.5px Inter, "Segoe UI", Arial, sans-serif; fill: #3D4B60; }
+      .sw { font: 400 12.5px Inter, "Segoe UI", Arial, sans-serif; fill: #D8E6FF; }
+      .chip { font: 600 12px Inter, "Segoe UI", Arial, sans-serif; fill: #0A1F44; }
+      .lbl { font: 600 11.5px Inter, "Segoe UI", Arial, sans-serif; fill: #33507A; }
+      .lblg { font: 700 11.5px Inter, "Segoe UI", Arial, sans-serif; fill: #007934; }
+      .ln { stroke: #33507A; stroke-width: 1.8; fill: none; }
+      .lg { stroke: #007934; stroke-width: 2; fill: none; stroke-dasharray: 6 5; }
+    </style>
+  </defs>
+
+  <rect width="1420" height="1000" rx="20" fill="#F5F8FC"/>
+  <text x="40" y="44" class="t" font-size="24" font-weight="800" fill="#0A1F44">PayPal Envelope · system architecture</text>
+  <text x="40" y="68" class="s">Every arrow is a real call path in the code. Money only leaves an envelope through the Policy Engine and the PayPal package.</text>
+
+  <!-- Band labels -->
+  <text x="40" y="118" class="band">PEOPLE</text>
+  <text x="40" y="208" class="band">FRONT ENDS</text>
+  <text x="40" y="350" class="band">PUBLIC EDGE</text>
+  <text x="40" y="478" class="band">CORE API</text>
+  <text x="40" y="668" class="band">PACKAGES</text>
+  <text x="40" y="852" class="band">OUTSIDE</text>
+  <text x="40" y="868" class="band">SERVICES</text>
+
+  <!-- PEOPLE -->
+  <g>
+    <rect x="180" y="96" width="185" height="40" rx="20" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="272" y="121" text-anchor="middle" class="chip">Envelope owner</text>
+    <rect x="380" y="96" width="180" height="40" rx="20" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="470" y="121" text-anchor="middle" class="chip">Friend (funds it)</text>
+    <rect x="585" y="96" width="380" height="40" rx="20" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="775" y="121" text-anchor="middle" class="chip">Shop owner (sees only payments received)</text>
+    <rect x="990" y="96" width="380" height="40" rx="20" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="1180" y="121" text-anchor="middle" class="chip">Platform operator</text>
+  </g>
+  <path class="ln" d="M272 136 V176" marker-end="url(#a)"/>
+  <path class="ln" d="M470 136 V176" marker-end="url(#a)"/>
+  <path class="ln" d="M775 136 V176" marker-end="url(#a)"/>
+  <path class="ln" d="M1180 136 V176" marker-end="url(#a)"/>
+
+  <!-- FRONT ENDS -->
+  <rect x="180" y="180" width="380" height="118" rx="14" fill="#FFFFFF" stroke="#0070BA" stroke-width="2"/>
+  <text x="200" y="208" class="h">Wallet site · PayPal Envelope</text>
+  <text x="200" y="230" class="s">paypal-interface/index.html + app.js (vanilla JS)</text>
+  <text x="200" y="250" class="s">Create · fund · manage envelopes, approvals, history</text>
+  <text x="200" y="270" class="s">Bryntum Calendar, Scheduler, TaskBoard, Gantt</text>
+  <text x="200" y="288" class="s">AG Grid statement · AG Charts 90-day price charts</text>
+
+  <rect x="585" y="180" width="380" height="118" rx="14" fill="#FFFFFF" stroke="#0070BA" stroke-width="2"/>
+  <text x="605" y="208" class="h">PayPal Counter · seller dashboard</text>
+  <text x="605" y="230" class="s">paypal-interface/business.html + business.js</text>
+  <text x="605" y="250" class="s">AG Grid Enterprise + AG Charts Enterprise</text>
+  <text x="605" y="270" class="s">Spike in demand · Bought together · TV mode</text>
+  <text x="605" y="288" class="s">Ask the grid in plain English · Excel report</text>
+
+  <rect x="990" y="180" width="380" height="118" rx="14" fill="#FFFFFF" stroke="#0070BA" stroke-width="2"/>
+  <text x="1010" y="208" class="h">Ops console</text>
+  <text x="1010" y="230" class="s">apps/web · React + Vite</text>
+  <text x="1010" y="250" class="s">AG Grid decision log, ledger, approvals</text>
+  <text x="1010" y="270" class="s">Bryntum Scheduler (React) · PayPal JS SDK</text>
+  <text x="1010" y="288" class="s">Audit Copilot chat · live Socket.IO feed</text>
+
+  <path class="ln" d="M370 298 V326" marker-end="url(#a)"/>
+  <path class="ln" d="M775 298 V326" marker-end="url(#a)"/>
+  <text x="383" y="317" class="lbl">cookie session · /me/*</text>
+  <text x="788" y="317" class="lbl">/biz/* (payments only, no socket)</text>
+
+  <!-- PUBLIC EDGE -->
+  <rect x="180" y="330" width="785" height="100" rx="14" fill="#E9F2FC" stroke="#7FA6D6"/>
+  <text x="200" y="358" class="h">Site server · paypal-interface/server.ts (Express)</text>
+  <text x="200" y="380" class="s">The only public URL (Cloudflare tunnel locally, Render when hosted). Logins, signed cookies, passwords for money</text>
+  <text x="200" y="398" class="s">actions, email confirm pages (/email/act), PayPal account linking, seller data (Transaction Search, Balances, NVP).</text>
+  <text x="200" y="418" class="s">Forwards only /socket.io and /webhooks to the private API. Refuses the live socket to business logins (403).</text>
+
+  <path class="ln" d="M1180 298 V456" marker-end="url(#a)"/>
+  <text x="1192" y="370" class="lbl">generated SDK</text>
+  <text x="1192" y="386" class="lbl">(public calls only,</text>
+  <text x="1192" y="402" class="lbl">no internal key)</text>
+
+  <path class="ln" d="M572 430 V456" marker-end="url(#a)"/>
+  <text x="585" y="449" class="lbl">generated SDK + internal key</text>
+
+  <!-- CORE API -->
+  <rect x="180" y="460" width="1190" height="150" rx="16" fill="#0A2A7A"/>
+  <text x="204" y="490" class="hw">PayPal Envelope API · apps/api (Express, port 4000, private)</text>
+  <text x="204" y="511" class="sw">42 operations described in OpenAPI 3.1, built from the same Zod schemas the routes validate with. A test keeps spec and routes in sync.</text>
+  <g>
+    <rect x="204" y="528" width="180" height="62" rx="10" fill="#FFFFFF"/>
+    <text x="294" y="553" text-anchor="middle" class="chip">REST routes</text>
+    <text x="294" y="573" text-anchor="middle" class="s">envelopes · funding · spend</text>
+    <rect x="398" y="528" width="180" height="62" rx="10" fill="#FFFFFF"/>
+    <text x="488" y="553" text-anchor="middle" class="chip">PayPal webhooks</text>
+    <text x="488" y="573" text-anchor="middle" class="s">verified · stored once</text>
+    <rect x="592" y="528" width="180" height="62" rx="10" fill="#FFFFFF"/>
+    <text x="682" y="553" text-anchor="middle" class="chip">Socket.IO events</text>
+    <text x="682" y="573" text-anchor="middle" class="s">envelope · ledger · agent steps</text>
+    <rect x="786" y="528" width="180" height="62" rx="10" fill="#FFFFFF"/>
+    <text x="876" y="553" text-anchor="middle" class="chip">Background tick (1 min)</text>
+    <text x="876" y="573" text-anchor="middle" class="s">sweep · save · watch · verify</text>
+    <rect x="980" y="528" width="180" height="62" rx="10" fill="#FFFFFF"/>
+    <text x="1070" y="553" text-anchor="middle" class="chip">Alert emails</text>
+    <text x="1070" y="573" text-anchor="middle" class="s">signed Approve / Pick links</text>
+    <rect x="1174" y="528" width="172" height="62" rx="10" fill="#FFFFFF"/>
+    <text x="1260" y="553" text-anchor="middle" class="chip">Audit writer</text>
+    <text x="1260" y="573" text-anchor="middle" class="s">every decision + entry</text>
+  </g>
+
+  <path class="ln" d="M380 610 V646" marker-end="url(#a)"/>
+  <text x="392" y="632" class="lbl">imports</text>
+  <path class="lg" d="M560 646 V614" marker-end="url(#ag)"/>
+  <text x="572" y="632" class="lblg">agent → API: 4 SDK calls, none of them pays</text>
+
+  <!-- PACKAGES -->
+  <g>
+    <rect x="180" y="650" width="226" height="130" rx="14" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="196" y="676" class="h">policy</text>
+    <text x="196" y="698" class="s">Compiler: plain English →</text>
+    <text x="196" y="716" class="s">rules (AI drafts, code fixes)</text>
+    <text x="196" y="738" class="s">Engine: APPROVE / BLOCK /</text>
+    <text x="196" y="756" class="s">NEEDS_HUMAN (no AI, 32 tests)</text>
+
+    <rect x="421" y="650" width="226" height="130" rx="14" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="437" y="676" class="h">agents</text>
+    <text x="437" y="698" class="s">Shopping agent: search, rank,</text>
+    <text x="437" y="716" class="s">compare, verify, ask to buy</text>
+    <text x="437" y="738" class="s">Bill-pay agent: reads invoices</text>
+    <text x="437" y="756" class="s">(Agent Toolkit, read-only)</text>
+
+    <rect x="662" y="650" width="226" height="130" rx="14" fill="#FFFFFF" stroke="#0070BA" stroke-width="2"/>
+    <text x="678" y="676" class="h">paypal</text>
+    <text x="678" y="698" class="s">The only money layer: Orders,</text>
+    <text x="678" y="716" class="s">Checkout, Payouts,</text>
+    <text x="678" y="738" class="s">Invoicing, Subscriptions,</text>
+    <text x="678" y="756" class="s">saved accounts, webhooks</text>
+
+    <rect x="903" y="650" width="226" height="130" rx="14" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="919" y="676" class="h">db</text>
+    <text x="919" y="698" class="s">Prisma schema + migrations</text>
+    <text x="919" y="716" class="s">Ledger in integer cents</text>
+    <text x="919" y="738" class="s">Row lock per envelope</text>
+    <text x="919" y="756" class="s">(SELECT … FOR UPDATE)</text>
+
+    <rect x="1144" y="650" width="226" height="130" rx="14" fill="#FFFFFF" stroke="#BFD0E6"/>
+    <text x="1160" y="676" class="h">audit</text>
+    <text x="1160" y="698" class="s">Plain-English audit records</text>
+    <text x="1160" y="716" class="s">Hybrid search (BM25 + meaning)</text>
+    <text x="1160" y="738" class="s">Anomaly score → UNUSUAL_SPEND</text>
+    <text x="1160" y="756" class="s">Audit Copilot with citations</text>
+  </g>
+
+  <!-- package -> outside -->
+  <path class="ln" d="M280 780 V826" marker-end="url(#a)"/>
+  <path class="ln" d="M470 780 L440 826" marker-end="url(#a)"/>
+  <path class="ln" d="M590 780 L610 826" marker-end="url(#a)"/>
+  <path class="ln" d="M775 780 V826" marker-end="url(#a)"/>
+  <path class="ln" d="M990 780 L960 826" marker-end="url(#a)"/>
+  <path class="ln" d="M1220 780 L1140 826" marker-end="url(#a)"/>
+  <path class="ln" d="M1370 560 H1396 V865 H1374" marker-end="url(#a)"/>
+  <text x="1300" y="812" class="lbl" text-anchor="end">alert webhook</text>
+  <text x="788" y="806" class="lbl">REST calls + webhooks</text>
+
+  <!-- OUTSIDE SERVICES -->
+  <g>
+    <rect x="180" y="830" width="158" height="74" rx="12" fill="#FFF7E6" stroke="#E2B65C"/>
+    <text x="259" y="858" text-anchor="middle" class="chip">AI models</text>
+    <text x="259" y="878" text-anchor="middle" class="s">Claude · Gemini fallback</text>
+    <rect x="352" y="830" width="158" height="74" rx="12" fill="#FFF7E6" stroke="#E2B65C"/>
+    <text x="431" y="858" text-anchor="middle" class="chip">Channel3</text>
+    <text x="431" y="878" text-anchor="middle" class="s">products · 90-day price</text>
+    <rect x="524" y="830" width="158" height="74" rx="12" fill="#FFF7E6" stroke="#E2B65C"/>
+    <text x="603" y="858" text-anchor="middle" class="chip">Kernel</text>
+    <text x="603" y="878" text-anchor="middle" class="s">cloud browser · live price</text>
+    <rect x="696" y="830" width="158" height="74" rx="12" fill="#0070BA"/>
+    <text x="775" y="858" text-anchor="middle" class="hw" font-size="14">PayPal (sandbox)</text>
+    <text x="775" y="878" text-anchor="middle" class="sw">REST APIs + webhooks</text>
+    <rect x="868" y="830" width="158" height="74" rx="12" fill="#FFF7E6" stroke="#E2B65C"/>
+    <text x="947" y="858" text-anchor="middle" class="chip">PostgreSQL</text>
+    <text x="947" y="878" text-anchor="middle" class="s">Render Postgres / Neon</text>
+    <rect x="1040" y="830" width="158" height="74" rx="12" fill="#FFF7E6" stroke="#E2B65C"/>
+    <text x="1119" y="858" text-anchor="middle" class="chip">Elasticsearch</text>
+    <text x="1119" y="878" text-anchor="middle" class="s">Elastic Cloud · ELSER</text>
+    <rect x="1212" y="830" width="158" height="74" rx="12" fill="#FFF7E6" stroke="#E2B65C"/>
+    <text x="1291" y="858" text-anchor="middle" class="chip">Zapier</text>
+    <text x="1291" y="878" text-anchor="middle" class="s">→ Gmail / Slack</text>
+  </g>
+
+  <!-- legend -->
+  <g transform="translate(180 940)">
+    <path class="ln" d="M0 6 H40" marker-end="url(#a)"/>
+    <text x="50" y="10" class="s">calls / data flow</text>
+    <path class="lg" d="M180 6 H220" marker-end="url(#ag)"/>
+    <text x="230" y="10" class="s">agent asks to buy (the Policy Engine decides)</text>
+    <rect x="560" y="-4" width="20" height="20" rx="4" fill="#0A2A7A"/>
+    <text x="590" y="10" class="s">private API</text>
+    <rect x="700" y="-4" width="20" height="20" rx="4" fill="#FFF7E6" stroke="#E2B65C"/>
+    <text x="730" y="10" class="s">outside service (optional ones degrade gracefully)</text>
+  </g>
+</svg>
