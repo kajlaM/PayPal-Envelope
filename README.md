@@ -173,8 +173,8 @@ npm run web:dev           #                  console  http://localhost:5173
 
 | Side | Username | Password |
 | :--- | :--- | :--- |
-| 👤 PayPal Envelope | `kajla` · `jugal` | `1234` |
-| 🏪 PayPal Counter | `audiostore` · `cityutility` | `12345678` |
+| 👤 PayPal Envelope | `kajla@personal.example.com` · `jugal@personal.example.com` | `1234` |
+| 🏪 PayPal Counter | `audio-store@business.examle.com` | `12345678` |
 
 > On Windows, run the parts separately (`npm run up` uses POSIX process groups) and set `CHROME_PATH` for the hidden browser that reads a personal sandbox balance, or set `KERNEL_API_KEY` to use Kernel's cloud browser instead.
 
@@ -509,6 +509,6 @@ More detail is in the [Render guide](tools/render/README.md).
 
 ## Team
 
-**Jugal Pahuja · Manish Kajla · Venkat Sai**
+**Manish Kajla · Jugal Pahuja · Venkat Sai**
 
-Built for the **Build What's Next with PayPal and AI** Global Hackathon 2026. All money in this project is PayPal sandbox money.
+Built for the ** PayPal and AI Hackathon 2026**. All money in this project is PayPal sandbox money.
