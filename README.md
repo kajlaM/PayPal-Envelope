@@ -19,6 +19,7 @@
 [Built with](#built-with) ·
 [What's next](#whats-next-on-render)
 
+
 </div>
 
 ---
@@ -48,7 +49,9 @@ There are three kinds of envelope:
 PayPal Envelope also has a second side. Every agent purchase lands at a shop, so we built **PayPal Counter**, a section of PayPal Business that shows shops which sales came from AI agents, warns them when agents buy unusually fast, and never reveals anything private about the buyer.
 
 ---
-
+## Live Deployment 
+Render Demo: [view here](https://paypal-envelope-site.onrender.com)
+Google Cloud Demo: [view here](https://paypal-envelope-851624821603.us-east5.run.app)
 ## Why we built it
 
 AI agents are getting good at shopping, but paying is still the hard part. Today there are two options, and neither works well:
@@ -511,4 +514,4 @@ More detail is in the [Render guide](tools/render/README.md).
 
 **Manish Kajla · Jugal Pahuja · Venkat Sai**
 
-Built for the ** PayPal and AI Hackathon 2026**. All money in this project is PayPal sandbox money.
+Built for the **PayPal and AI Hackathon 2026** . All money in this project is PayPal sandbox money.
